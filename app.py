@@ -231,24 +231,11 @@ with tab3:
             live_res = requests.get(live_url).json()
             live_points_map = {item['id']: item['stats']['total_points'] for item in live_res.get('elements', [])}
 
-            # Summary Metrics Header (4 KPI cards including Total Points)
+            # 4. Extract Squad Information & Metadata
             entry_history = picks_data.get('entry_history', {})
-            gw_points = entry_history.get('points', 0)
             transfers_cost = entry_history.get('event_transfers_cost', 0)
             total_points = mgr_data.get('summary_overall_points', 0)
 
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Manager", mgr_data.get('name', 'My Team'))
-            col2.metric("Overall Rank", f"{mgr_data.get('summary_overall_rank', 0):,}")
-            col3.metric("Total Points", f"{total_points:,}")
-            col4.metric(
-                f"GW {target_gw} Points", 
-                gw_points, 
-                delta=f"-{transfers_cost} pts hit" if transfers_cost > 0 else None, 
-                delta_color="inverse"
-            )
-
-            # 4. Extract Squad Information
             picks_list = picks_data.get('picks', [])
             pick_ids = [p['element'] for p in picks_list]
             placeholders = ','.join(['?'] * len(pick_ids))
@@ -289,6 +276,22 @@ with tab3:
             # Calculate Live Gameweek Points with captain multiplier
             squad_df['Raw_GW_Pts'] = squad_df['id'].map(lambda x: live_points_map.get(x, 0))
             squad_df['GW_Points'] = squad_df['Raw_GW_Pts'] * squad_df['Multiplier']
+
+            # Calculate Live GW Points directly from Starting XI (positions 1 to 11)
+            starting_xi_pts = squad_df[squad_df['order'] <= 11]['GW_Points'].sum()
+            live_gw_pts = int(starting_xi_pts) - transfers_cost
+
+            # Render Manager Summary Header (Single Block)
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Manager", mgr_data.get('name', 'My Team'))
+            col2.metric("Overall Rank", f"{mgr_data.get('summary_overall_rank', 0):,}")
+            col3.metric("Total Points", f"{total_points:,}")
+            col4.metric(
+                f"GW {target_gw} Points", 
+                live_gw_pts, 
+                delta=f"-{transfers_cost} pts hit" if transfers_cost > 0 else None, 
+                delta_color="inverse"
+            )
 
             def format_player_name(row):
                 name = row['Player']
