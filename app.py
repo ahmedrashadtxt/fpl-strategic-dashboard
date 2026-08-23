@@ -4,49 +4,114 @@ import pandas as pd
 import requests
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 
+from theme import (
+    apply_theme,
+    fmt_num,
+    render_list_card,
+    render_sidebar_card,
+    render_stats_banner,
+    render_top_bar,
+    section_header,
+)
+
 if get_script_run_ctx() is None:
     import subprocess
     import sys
 
     sys.exit(subprocess.call([sys.executable, "-m", "streamlit", "run", __file__]))
 
-st.set_page_config(page_title="The Hype Press - FPL Analytics Hub", layout="wide")
+st.set_page_config(page_title="FPL Strategic Dashboard", layout="wide", initial_sidebar_state="expanded")
 
-# ==========================================
-# HEADER & REFRESH BUTTON
-# ==========================================
-header_col, btn_col = st.columns([5, 1])
+apply_theme()
 
-with header_col:
-    st.title("⚽ FPL Strategic Dashboard")
+conn = sqlite3.connect("fpl.db")
 
-with btn_col:
-    st.write("")
-    st.write("")
-    if st.button("🔄 Refresh", width="stretch"):
+events_df = pd.read_sql("SELECT id, name, is_current, is_next FROM events", conn)
+next_gw_row = events_df[events_df["is_next"] == 1]
+current_gw_row = events_df[events_df["is_current"] == 1]
+current_gw = int(next_gw_row["id"].values[0]) if not next_gw_row.empty else 1
+gw_name = next_gw_row["name"].values[0] if not next_gw_row.empty else f"Gameweek {current_gw}"
+
+summary_df = pd.read_sql(
+    """
+    SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN (expected_goals - goals_scored) >= 0.5 THEN 1 ELSE 0 END) AS buy_signals,
+        SUM(CASE WHEN (expected_goals - goals_scored) <= -0.5 THEN 1 ELSE 0 END) AS sell_signals,
+        SUM(CASE WHEN (transfers_in_event - transfers_out_event) > 30000 THEN 1 ELSE 0 END) AS heating,
+        SUM(CASE WHEN (transfers_in_event - transfers_out_event) < -30000 THEN 1 ELSE 0 END) AS cooling
+    FROM players
+    WHERE minutes > 0
+    """,
+    conn,
+)
+
+top_xgi_df = pd.read_sql(
+    """
+    SELECT p.web_name, t.short_name, p.expected_goal_involvements AS xgi
+    FROM players p
+    INNER JOIN teams t ON p.team = t.id
+    WHERE p.minutes > 270
+    ORDER BY p.expected_goal_involvements DESC
+    LIMIT 8
+    """,
+    conn,
+)
+
+# ── Sidebar ──────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown(f'<span class="gw-badge">NEXT · {gw_name}</span>', unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    render_sidebar_card("Season Overview", [
+        ("Gameweek", gw_name),
+        ("Players Tracked", f"{int(summary_df['total'].values[0]):,}"),
+        ("Buy Signals", f"{int(summary_df['buy_signals'].values[0]):,}"),
+        ("Sell Signals", f"{int(summary_df['sell_signals'].values[0]):,}"),
+    ])
+
+    render_sidebar_card("Transfer Market", [
+        ("Heating Up", f"{int(summary_df['heating'].values[0]):,}"),
+        ("Cooling Down", f"{int(summary_df['cooling'].values[0]):,}"),
+    ])
+
+    st.markdown('<div class="sidebar-card"><h4>Top xGI Leaders</h4></div>', unsafe_allow_html=True)
+    chart_data = top_xgi_df.set_index("web_name")["xgi"]
+    st.bar_chart(chart_data, color="#22c55e", height=180)
+
+    if st.button("Refresh Data", width="stretch", type="primary"):
         st.cache_data.clear()
         st.rerun()
 
-conn = sqlite3.connect('fpl.db')
+# ── Main header ──────────────────────────────────────────────────────────────
+render_top_bar(f"Strategic analytics · {gw_name}")
 
-# Identify the upcoming gameweek
-events_df = pd.read_sql("SELECT id, name, is_current, is_next FROM events", conn)
-next_gw_row = events_df[events_df['is_next'] == 1]
-current_gw = int(next_gw_row['id'].values[0]) if not next_gw_row.empty else 1
+header_left, header_right = st.columns([4, 1])
+with header_left:
+    render_stats_banner(
+        int(summary_df["total"].values[0]),
+        int(summary_df["buy_signals"].values[0]),
+        int(summary_df["sell_signals"].values[0]),
+    )
+with header_right:
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        '<div style="text-align:right;color:#555;font-size:0.75rem;margin-top:1.5rem">'
+        "Data sourced from FPL API<br>Updated on refresh"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
-# Create 4 dedicated strategic tabs
 tab1, tab2, tab3, tab4 = st.tabs([
-    "🎯 Expected Stats & Underperformance", 
-    "🗓️ Fixture Difficulty Ticker", 
-    "👤 Manager Squad Analyzer",
-    "📈 Transfer Market Watch"
+    "Expected Stats",
+    "Fixture Ticker",
+    "Squad Analyzer",
+    "Transfer Market",
 ])
 
-# ==========================================
-# TAB 1: EXPECTED STATS & UNDERPERFORMANCE
-# ==========================================
+# ── TAB 1 ────────────────────────────────────────────────────────────────────
 with tab1:
-    st.subheader("Identify High-Value & Unlucky Assets")
+    section_header("Expected Stats & Underperformance", "Identify high-value and unlucky assets")
 
     col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
@@ -62,17 +127,15 @@ with tab1:
                 "xGI per 90",
                 "Total Points",
                 "Clean Sheets",
-                "Goalkeeper Saves"
-            ]
+                "Goalkeeper Saves",
+            ],
         )
 
-    # Position mapping (1: GKP, 2: DEF, 3: MID, 4: FWD)
     pos_map = {"GKP": 1, "DEF": 2, "MID": 3, "FWD": 4}
     pos_clause = f"AND p.element_type = {pos_map[position_filter]}" if position_filter != "All" else ""
 
-    # SQL query including Total Points
     query = f"""
-    SELECT 
+    SELECT
         p.web_name AS Player,
         t.short_name AS Team,
         CASE p.element_type
@@ -98,70 +161,76 @@ with tab1:
     WHERE p.minutes >= {min_minutes} {pos_clause}
     """
     df_xgi = pd.read_sql(query, conn)
+    for col_name in ("Price", "Minutes", "Total_Points", "Goals", "Assists", "Clean_Sheets", "Saves", "xG", "xA", "xGI", "xG_Delta", "xGI_per_90"):
+        df_xgi[col_name] = pd.to_numeric(df_xgi[col_name], errors="coerce")
 
-    # Sorting logic
-    if sort_by == "Expected Goal Involvements (xGI)":
-        df_xgi = df_xgi.sort_values(by="xGI", ascending=False)
-    elif sort_by == "Goals Below Expected (Unlucky)":
-        df_xgi = df_xgi.sort_values(by="xG_Delta", ascending=False)
-    elif sort_by == "xGI per 90":
-        df_xgi = df_xgi.sort_values(by="xGI_per_90", ascending=False)
-    elif sort_by == "Total Points":
-        df_xgi = df_xgi.sort_values(by="Total_Points", ascending=False)
-    elif sort_by == "Clean Sheets":
-        df_xgi = df_xgi.sort_values(by="Clean_Sheets", ascending=False)
-    elif sort_by == "Goalkeeper Saves":
-        df_xgi = df_xgi.sort_values(by="Saves", ascending=False)
+    sort_map = {
+        "Expected Goal Involvements (xGI)": ("xGI", False),
+        "Goals Below Expected (Unlucky)": ("xG_Delta", False),
+        "xGI per 90": ("xGI_per_90", False),
+        "Total Points": ("Total_Points", False),
+        "Clean Sheets": ("Clean_Sheets", False),
+        "Goalkeeper Saves": ("Saves", False),
+    }
+    col, asc = sort_map[sort_by]
+    df_xgi = df_xgi.sort_values(by=col, ascending=asc)
 
-    # Styling helper for xG Delta
+    top_cards = df_xgi.head(5)
+    card_cols = st.columns(5)
+    for i, (_, row) in enumerate(top_cards.iterrows()):
+        delta = float(row["xG_Delta"])
+        if delta >= 0.5:
+            signal_tag = ("Buy Signal", "green")
+        elif delta <= -0.5:
+            signal_tag = ("Sell Signal", "red")
+        else:
+            signal_tag = ("Neutral", "gray")
+        with card_cols[i]:
+            render_list_card(
+                f"{row['Player']} ({row['Team']})",
+                [(row["Pos"], "blue"), signal_tag],
+                f'<span>Price</span> £{fmt_num(row["Price"], ".1f")} · <span>xGI</span> {fmt_num(row["xGI"])} · <span>Pts</span> {int(float(row["Total_Points"]))} · <span>ΔxG</span> {fmt_num(delta, "+.2f")}',
+            )
+
     def highlight_xg_delta(val):
         try:
             val = float(val)
             if val >= 0.5:
-                return 'background-color: rgba(39, 174, 96, 0.4)'
-            elif val > 0:
-                return 'background-color: rgba(39, 174, 96, 0.15)'
-            elif val <= -0.5:
-                return 'background-color: rgba(231, 76, 60, 0.2)'
+                return "background-color: rgba(34, 197, 94, 0.25)"
+            if val > 0:
+                return "background-color: rgba(34, 197, 94, 0.1)"
+            if val <= -0.5:
+                return "background-color: rgba(239, 68, 68, 0.2)"
         except (ValueError, TypeError):
             pass
-        return ''
+        return ""
 
-    df_display = df_xgi.head(25)
-    styled_df = df_display.style.map(highlight_xg_delta, subset=['xG_Delta'])
-
-    # Render table with custom column formatting
     st.dataframe(
-        styled_df,
+        df_xgi.head(25).style.map(highlight_xg_delta, subset=["xG_Delta"]),
         hide_index=True,
         width="stretch",
         column_config={
             "Price": st.column_config.NumberColumn(format="£%.1f"),
             "Minutes": st.column_config.NumberColumn("Mins"),
-            "Total_Points": st.column_config.NumberColumn("Pts", help="Total FPL points accumulated this season"),
+            "Total_Points": st.column_config.NumberColumn("Pts"),
             "Goals": st.column_config.NumberColumn("G"),
             "Assists": st.column_config.NumberColumn("A"),
-            "Clean_Sheets": st.column_config.NumberColumn("CS", help="Clean Sheets kept"),
-            "Saves": st.column_config.NumberColumn("Saves", help="Total shots saved (Goalkeepers)"),
+            "Clean_Sheets": st.column_config.NumberColumn("CS"),
+            "Saves": st.column_config.NumberColumn("Saves"),
             "xG": st.column_config.NumberColumn(format="%.2f"),
             "xA": st.column_config.NumberColumn(format="%.2f"),
             "xGI": st.column_config.NumberColumn(format="%.2f"),
-            "xG_Delta": st.column_config.NumberColumn(
-                format="%.2f",
-                help="Positive = Underperforming (Due for a haul). Dark green indicates a buy signal."
-            ),
-            "xGI_per_90": st.column_config.NumberColumn("xGI/90", format="%.2f")
-        }
+            "xG_Delta": st.column_config.NumberColumn(format="%.2f"),
+            "xGI_per_90": st.column_config.NumberColumn("xGI/90", format="%.2f"),
+        },
     )
 
-# ==========================================
-# TAB 2: FIXTURE DIFFICULTY TICKER (FDR)
-# ==========================================
+# ── TAB 2 ────────────────────────────────────────────────────────────────────
 with tab2:
-    st.subheader(f"Upcoming Schedule: GW{current_gw} to GW{current_gw + 4}")
-    
+    section_header(f"Fixture Difficulty · GW{current_gw}–{current_gw + 4}", "Upcoming schedule ranked by difficulty")
+
     fixtures_query = """
-    SELECT 
+    SELECT
         f.event AS GW,
         th.short_name AS Home_Team,
         ta.short_name AS Away_Team,
@@ -175,80 +244,83 @@ with tab2:
     """
     fixtures_df = pd.read_sql(fixtures_query, conn, params=[current_gw, current_gw + 5])
 
-    # Reconstruct matrix of Teams vs Upcoming GWs
-    teams_list = pd.read_sql("SELECT short_name FROM teams ORDER BY name", conn)['short_name'].tolist()
+    teams_list = pd.read_sql("SELECT short_name FROM teams ORDER BY name", conn)["short_name"].tolist()
     ticker_data = []
 
     for team in teams_list:
         row = {"Team": team}
         total_difficulty = 0
-        
         for gw in range(current_gw, current_gw + 5):
-            match = fixtures_df[(fixtures_df['GW'] == gw) & ((fixtures_df['Home_Team'] == team) | (fixtures_df['Away_Team'] == team))]
+            match = fixtures_df[
+                (fixtures_df["GW"] == gw)
+                & ((fixtures_df["Home_Team"] == team) | (fixtures_df["Away_Team"] == team))
+            ]
             if not match.empty:
                 m = match.iloc[0]
-                if m['Home_Team'] == team:
+                if m["Home_Team"] == team:
                     opp = f"{m['Away_Team']} (H)"
-                    diff = m['Home_Diff']
+                    diff = m["Home_Diff"]
                 else:
                     opp = f"{m['Home_Team']} (A)"
-                    diff = m['Away_Diff']
+                    diff = m["Away_Diff"]
                 row[f"GW {gw}"] = f"{opp} [{diff}]"
                 total_difficulty += diff
             else:
                 row[f"GW {gw}"] = "Blank"
                 total_difficulty += 5
-        
         row["Difficulty Rating"] = total_difficulty
         ticker_data.append(row)
 
     ticker_df = pd.DataFrame(ticker_data).sort_values(by="Difficulty Rating", ascending=True)
+
+    easy_teams = ticker_df.head(5)
+    for _, row in easy_teams.iterrows():
+        fixtures_str = " · ".join(row[f"GW {gw}"] for gw in range(current_gw, current_gw + 5))
+        rating = row["Difficulty Rating"]
+        tag = ("Easy Run", "green") if rating <= 10 else ("Moderate", "yellow")
+        render_list_card(
+            row["Team"],
+            [tag, (f"Rating {rating}", "gray")],
+            f'<span>Fixtures</span> {fixtures_str}',
+        )
+
     st.dataframe(ticker_df, width="stretch")
 
-# ==========================================
-# TAB 3: MANAGER SQUAD LOOKUP
-# ==========================================
+# ── TAB 3 ────────────────────────────────────────────────────────────────────
 with tab3:
-    st.subheader("Import FPL Manager Team")
-    manager_id = st.text_input("Enter FPL Team / Entry ID (e.g., from your FPL points URL):", "")
+    section_header("Manager Squad Analyzer", "Import your FPL team ID to analyze your squad")
+
+    manager_id = st.text_input("FPL Team / Entry ID", placeholder="e.g. 1234567")
 
     if manager_id:
         try:
-            # 1. Fetch Manager Profile & Summary
             mgr_url = f"https://fantasy.premierleague.com/api/entry/{manager_id}/"
             mgr_data = requests.get(mgr_url).json()
 
-            # Determine the target gameweek
             target_gw = current_gw if current_gw >= 1 else 1
-
-            # 2. Fetch Gameweek Picks
             picks_url = f"https://fantasy.premierleague.com/api/entry/{manager_id}/event/{target_gw}/picks/"
             picks_res = requests.get(picks_url)
-            
-            # Fallback to GW1 if the target gameweek picks haven't unlocked yet
+
             if picks_res.status_code != 200 and target_gw > 1:
                 target_gw -= 1
                 picks_url = f"https://fantasy.premierleague.com/api/entry/{manager_id}/event/{target_gw}/picks/"
                 picks_res = requests.get(picks_url)
-                
-            picks_data = picks_res.json()
 
-            # 3. Fetch Live Gameweek Points from FPL Live API
+            picks_data = picks_res.json()
             live_url = f"https://fantasy.premierleague.com/api/event/{target_gw}/live/"
             live_res = requests.get(live_url).json()
-            live_points_map = {item['id']: item['stats']['total_points'] for item in live_res.get('elements', [])}
+            live_points_map = {item["id"]: item["stats"]["total_points"] for item in live_res.get("elements", [])}
 
-            # 4. Extract Squad Information & Metadata
-            entry_history = picks_data.get('entry_history', {})
-            transfers_cost = entry_history.get('event_transfers_cost', 0)
-            total_points = mgr_data.get('summary_overall_points', 0)
+            entry_history = picks_data.get("entry_history", {})
+            transfers_cost = entry_history.get("event_transfers_cost", 0)
+            total_points = mgr_data.get("summary_overall_points", 0)
 
-            picks_list = picks_data.get('picks', [])
-            pick_ids = [p['element'] for p in picks_list]
-            placeholders = ','.join(['?'] * len(pick_ids))
+            picks_list = picks_data.get("picks", [])
+            pick_ids = [p["element"] for p in picks_list]
+            placeholders = ",".join(["?"] * len(pick_ids))
 
             squad_query = f"""
-            SELECT 
+            SELECT
                 p.id,
                 p.web_name AS Player,
                 t.name AS Team,
@@ -265,91 +337,90 @@ with tab3:
             """
             squad_df = pd.read_sql(squad_query, conn, params=pick_ids)
 
-            # Map Pick metadata
             meta_dict = {
-                p['element']: {
-                    'multiplier': p['multiplier'],
-                    'is_captain': p['is_captain'],
-                    'is_vice': p['is_vice_captain'],
-                    'order': p['position']
-                } for p in picks_list
+                p["element"]: {
+                    "multiplier": p["multiplier"],
+                    "is_captain": p["is_captain"],
+                    "is_vice": p["is_vice_captain"],
+                    "order": p["position"],
+                }
+                for p in picks_list
             }
 
-            squad_df['order'] = squad_df['id'].map(lambda x: meta_dict[x]['order'])
-            squad_df['Multiplier'] = squad_df['id'].map(lambda x: meta_dict[x]['multiplier'])
-            squad_df['is_cap'] = squad_df['id'].map(lambda x: meta_dict[x]['is_captain'])
-            squad_df['is_vc'] = squad_df['id'].map(lambda x: meta_dict[x]['is_vice'])
+            squad_df["order"] = squad_df["id"].map(lambda x: meta_dict[x]["order"])
+            squad_df["Multiplier"] = squad_df["id"].map(lambda x: meta_dict[x]["multiplier"])
+            squad_df["is_cap"] = squad_df["id"].map(lambda x: meta_dict[x]["is_captain"])
+            squad_df["is_vc"] = squad_df["id"].map(lambda x: meta_dict[x]["is_vice"])
+            squad_df["Raw_GW_Pts"] = squad_df["id"].map(lambda x: live_points_map.get(x, 0))
+            squad_df["GW_Points"] = squad_df["Raw_GW_Pts"] * squad_df["Multiplier"]
 
-            # Calculate Live Gameweek Points with captain multiplier
-            squad_df['Raw_GW_Pts'] = squad_df['id'].map(lambda x: live_points_map.get(x, 0))
-            squad_df['GW_Points'] = squad_df['Raw_GW_Pts'] * squad_df['Multiplier']
-
-            # Calculate Live GW Points directly from Starting XI (positions 1 to 11)
-            starting_xi_pts = squad_df[squad_df['order'] <= 11]['GW_Points'].sum()
+            starting_xi_pts = squad_df[squad_df["order"] <= 11]["GW_Points"].sum()
             live_gw_pts = int(starting_xi_pts) - transfers_cost
 
-            # Render Manager Summary Header (Single Block)
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Manager", mgr_data.get('name', 'My Team'))
+            col1.metric("Manager", mgr_data.get("name", "My Team"))
             col2.metric("Overall Rank", f"{mgr_data.get('summary_overall_rank', 0):,}")
             col3.metric("Total Points", f"{total_points:,}")
             col4.metric(
-                f"GW {target_gw} Points", 
-                live_gw_pts, 
-                delta=f"-{transfers_cost} pts hit" if transfers_cost > 0 else None, 
-                delta_color="inverse"
+                f"GW {target_gw} Points",
+                live_gw_pts,
+                delta=f"-{transfers_cost} pts hit" if transfers_cost > 0 else None,
+                delta_color="inverse",
             )
 
-            def format_player_name(row):
-                name = row['Player']
-                if row['is_cap']:
-                    return f"{name} (C)"
-                if row['is_vc']:
-                    return f"{name} (VC)"
-                if row['order'] > 11:
-                    return f"{name} (Bench)"
-                return name
+            squad_df = squad_df.sort_values(by="order", ascending=True)
 
-            squad_df['Player'] = squad_df.apply(format_player_name, axis=1)
-            squad_df = squad_df.sort_values(by='order', ascending=True)
+            col_squad, col_news = st.columns([7, 3])
 
-            # 5. Display Layout
-            col_table, col_news = st.columns([7, 3])
+            with col_squad:
+                for _, row in squad_df.iterrows():
+                    tags = [(row["Position"], "blue")]
+                    if row["is_cap"]:
+                        tags.append(("Captain", "green"))
+                    elif row["is_vc"]:
+                        tags.append(("Vice Captain", "yellow"))
+                    elif row["order"] > 11:
+                        tags.append(("Bench", "gray"))
 
-            with col_table:
-                display_cols = ['Player', 'Team', 'Position', 'Cost', 'GW_Points', 'Season_Points']
-                st.dataframe(
-                    squad_df[display_cols],
-                    hide_index=True,
-                    width="stretch",
-                    column_config={
-                        "Cost": st.column_config.NumberColumn(format="£%.1f"),
-                        "GW_Points": st.column_config.NumberColumn(help=f"Points scored in Gameweek {target_gw} (Captain points doubled)"),
-                        "Season_Points": st.column_config.NumberColumn("Total Points")
-                    }
-                )
+                    if row["Status"] == "a":
+                        tags.append(("Available", "green"))
+                    elif row["Status"] in ("i", "u"):
+                        tags.append(("Out", "red"))
+                    elif row["Status"] == "d":
+                        tags.append(("Doubtful", "yellow"))
+                    elif row["Status"] == "s":
+                        tags.append(("Suspended", "red"))
+
+                    render_list_card(
+                        f"{row['Player']} · {row['Team']}",
+                        tags,
+                        f'<span>GW Pts</span> {int(float(row["GW_Points"]))} · <span>Season</span> {int(float(row["Season_Points"]))} pts · <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
+                    )
 
             with col_news:
-                st.subheader("🏥 Squad News")
+                st.markdown('<div class="section-card"><h3>Squad News</h3></div>', unsafe_allow_html=True)
                 flagged_players = squad_df[
-                    (squad_df['Status'] != 'a') & 
-                    (squad_df['News'].notna()) & 
-                    (squad_df['News'] != '') & 
-                    (squad_df['News'] != 'None')
+                    (squad_df["Status"] != "a")
+                    & (squad_df["News"].notna())
+                    & (squad_df["News"] != "")
+                    & (squad_df["News"] != "None")
                 ]
 
                 if flagged_players.empty:
-                    st.success("All players are available. No injuries or suspensions reported.")
+                    st.success("All players available.")
                 else:
                     for _, row in flagged_players.iterrows():
-                        chance_val = row['Chance']
-                        chance_str = f" ({int(float(chance_val))}% chance)" if pd.notna(chance_val) and str(chance_val).strip() not in ['', 'None'] else ""
-                        
-                        if row['Status'] in ['i', 'u']:
+                        chance_val = row["Chance"]
+                        chance_str = (
+                            f" ({int(float(chance_val))}% chance)"
+                            if pd.notna(chance_val) and str(chance_val).strip() not in ("", "None")
+                            else ""
+                        )
+                        if row["Status"] in ("i", "u"):
                             st.error(f"**{row['Player']}** (Out)\n\n{row['News']}")
-                        elif row['Status'] == 'd':
+                        elif row["Status"] == "d":
                             st.warning(f"**{row['Player']}**{chance_str}\n\n{row['News']}")
-                        elif row['Status'] == 's':
+                        elif row["Status"] == "s":
                             st.error(f"**{row['Player']}** (Suspended)\n\n{row['News']}")
                         else:
                             st.info(f"**{row['Player']}**\n\n{row['News']}")
@@ -357,15 +428,12 @@ with tab3:
         except Exception as e:
             st.error(f"Could not load team. Verify your FPL ID. (Error: {e})")
 
-# ==========================================
-# TAB 4: TRANSFER MARKET WATCH
-# ==========================================
+# ── TAB 4 ────────────────────────────────────────────────────────────────────
 with tab4:
-    st.subheader("Live Transfer Market Trends")
-    st.write("Track net transfers to anticipate price rises and falls before the midnight deadline.")
+    section_header("Transfer Market Watch", "Track net transfers to anticipate price changes")
 
     market_query = """
-    SELECT 
+    SELECT
         p.web_name AS Player,
         t.short_name AS Team,
         (p.now_cost - p.cost_change_start) / 10.0 AS Start_Price,
@@ -377,80 +445,36 @@ with tab4:
     ORDER BY Net_Transfers DESC
     """
     market_df = pd.read_sql(market_query, conn)
-
-    def highlight_total_change(val):
-        try:
-            val = float(val)
-            if val > 0:
-                return 'background-color: rgba(39, 174, 96, 0.35)'
-            elif val < 0:
-                return 'background-color: rgba(231, 76, 60, 0.35)'
-        except (ValueError, TypeError):
-            pass
-        return ''
-
-    col_config = {
-        "Start_Price": st.column_config.NumberColumn("Start Price", format="£%.1f"),
-        "Current_Price": st.column_config.NumberColumn("Current Price", format="£%.1f"),
-        "Total_Change": st.column_config.NumberColumn(
-            "Change", 
-            format="%+.1fm", 
-            help="Total price change since GW1. Green indicates a rise; red indicates a drop."
-        ),
-        "Net_Transfers": st.column_config.NumberColumn("Net Transfers")
-    }
-
+    for col_name in ("Start_Price", "Current_Price", "Total_Change", "Net_Transfers"):
+        market_df[col_name] = pd.to_numeric(market_df[col_name], errors="coerce")
     THRESHOLD = 60000
 
     col_in, col_out = st.columns(2)
 
     with col_in:
-        st.markdown("### 🔥 Heating Up (Likely to Rise)")
-        top_in = market_df.head(20).copy()
-        top_in['Progress'] = (top_in['Net_Transfers'] / THRESHOLD) * 100
-        top_in['Progress'] = top_in['Progress'].clip(upper=100)
-        
-        styled_top_in = top_in.style.map(highlight_total_change, subset=['Total_Change'])
-        
-        col_config_in = col_config.copy()
-        col_config_in["Progress"] = st.column_config.ProgressColumn(
-            "Rise Probability",
-            help=f"Estimated progress toward a price rise based on a {THRESHOLD:,} net transfer threshold.",
-            format="%d%%",
-            min_value=0,
-            max_value=100,
-        )
-        
-        st.dataframe(
-            styled_top_in,
-            hide_index=True,
-            width="stretch",
-            column_config=col_config_in
-        )
+        st.markdown("#### Heating Up")
+        for _, row in market_df.head(10).iterrows():
+            progress = min((row["Net_Transfers"] / THRESHOLD) * 100, 100)
+            change_tag = ("Rising", "green") if row["Total_Change"] > 0 else ("Flat", "gray")
+            render_list_card(
+                f"{row['Player']} · {row['Team']}",
+                [("Transfer In", "green"), change_tag],
+                f'<span>Price</span> £{fmt_num(row["Current_Price"], ".1f")} · <span>Change</span> {fmt_num(row["Total_Change"], "+.1f")}m · <span>Net</span> {int(float(row["Net_Transfers"])):,}',
+                progress=progress,
+            )
 
     with col_out:
-        st.markdown("### ❄️ Cooling Down (Likely to Drop)")
-        top_out = market_df.tail(20).copy()
-        top_out = top_out.sort_values(by="Net_Transfers", ascending=True)
-        top_out['Progress'] = (top_out['Net_Transfers'].abs() / THRESHOLD) * 100
-        top_out['Progress'] = top_out['Progress'].clip(upper=100)
-        
-        styled_top_out = top_out.style.map(highlight_total_change, subset=['Total_Change'])
-        
-        col_config_out = col_config.copy()
-        col_config_out["Progress"] = st.column_config.ProgressColumn(
-            "Drop Probability",
-            help=f"Estimated progress toward a price drop based on a {THRESHOLD:,} net transfer threshold.",
-            format="%d%%",
-            min_value=0,
-            max_value=100,
-        )
-        
-        st.dataframe(
-            styled_top_out,
-            hide_index=True,
-            width="stretch",
-            column_config=col_config_out
-        )
+        st.markdown("#### Cooling Down")
+        bottom = market_df.tail(10).sort_values(by="Net_Transfers", ascending=True)
+        for _, row in bottom.iterrows():
+            progress = min((abs(row["Net_Transfers"]) / THRESHOLD) * 100, 100)
+            change_tag = ("Falling", "red") if row["Total_Change"] < 0 else ("Flat", "gray")
+            render_list_card(
+                f"{row['Player']} · {row['Team']}",
+                [("Transfer Out", "red"), change_tag],
+                f'<span>Price</span> £{fmt_num(row["Current_Price"], ".1f")} · <span>Change</span> {fmt_num(row["Total_Change"], "+.1f")}m · <span>Net</span> {int(float(row["Net_Transfers"])):,}',
+                progress=progress,
+                progress_red=True,
+            )
 
 conn.close()
