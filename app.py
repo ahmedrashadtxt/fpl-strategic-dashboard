@@ -2,6 +2,13 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import requests
+from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+if get_script_run_ctx() is None:
+    import subprocess
+    import sys
+
+    sys.exit(subprocess.call([sys.executable, "-m", "streamlit", "run", __file__]))
 
 st.set_page_config(page_title="The Hype Press - FPL Analytics Hub", layout="wide")
 
@@ -16,7 +23,7 @@ with header_col:
 with btn_col:
     st.write("")
     st.write("")
-    if st.button("🔄 Refresh", use_container_width=True):
+    if st.button("🔄 Refresh", width="stretch"):
         st.cache_data.clear()
         st.rerun()
 
@@ -127,7 +134,7 @@ with tab1:
     st.dataframe(
         styled_df,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "Price": st.column_config.NumberColumn(format="£%.1f"),
             "Minutes": st.column_config.NumberColumn("Mins"),
@@ -196,7 +203,7 @@ with tab2:
         ticker_data.append(row)
 
     ticker_df = pd.DataFrame(ticker_data).sort_values(by="Difficulty Rating", ascending=True)
-    st.dataframe(ticker_df, use_container_width=True)
+    st.dataframe(ticker_df, width="stretch")
 
 # ==========================================
 # TAB 3: MANAGER SQUAD LOOKUP
@@ -314,7 +321,7 @@ with tab3:
                 st.dataframe(
                     squad_df[display_cols],
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                     column_config={
                         "Cost": st.column_config.NumberColumn(format="£%.1f"),
                         "GW_Points": st.column_config.NumberColumn(help=f"Points scored in Gameweek {target_gw} (Captain points doubled)"),
@@ -417,7 +424,7 @@ with tab4:
         st.dataframe(
             styled_top_in,
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             column_config=col_config_in
         )
 
@@ -442,7 +449,7 @@ with tab4:
         st.dataframe(
             styled_top_out,
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             column_config=col_config_out
         )
 
