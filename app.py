@@ -3,8 +3,22 @@ import sqlite3
 import pandas as pd
 import requests
 
-st.set_page_config(page_title="FPL Analytics Hub", layout="wide")
-st.title("⚽ FPL Strategic Dashboard")
+st.set_page_config(page_title="The Hype Press - FPL Analytics Hub", layout="wide")
+
+# ==========================================
+# HEADER & REFRESH BUTTON
+# ==========================================
+header_col, btn_col = st.columns([5, 1])
+
+with header_col:
+    st.title("⚽ FPL Strategic Dashboard")
+
+with btn_col:
+    st.write("")
+    st.write("")
+    if st.button("🔄 Refresh", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
 
 conn = sqlite3.connect('fpl.db')
 
@@ -139,7 +153,6 @@ with tab1:
 with tab2:
     st.subheader(f"Upcoming Schedule: GW{current_gw} to GW{current_gw + 4}")
     
-    # Query upcoming 5 gameweeks
     fixtures_query = """
     SELECT 
         f.event AS GW,
@@ -198,7 +211,7 @@ with tab3:
             mgr_url = f"https://fantasy.premierleague.com/api/entry/{manager_id}/"
             mgr_data = requests.get(mgr_url).json()
 
-            # Determine the target gameweek (use current or previous if season is underway)
+            # Determine the target gameweek
             target_gw = current_gw if current_gw >= 1 else 1
 
             # 2. Fetch Gameweek Picks
@@ -218,15 +231,22 @@ with tab3:
             live_res = requests.get(live_url).json()
             live_points_map = {item['id']: item['stats']['total_points'] for item in live_res.get('elements', [])}
 
-            # Summary Metrics Header
+            # Summary Metrics Header (4 KPI cards including Total Points)
             entry_history = picks_data.get('entry_history', {})
             gw_points = entry_history.get('points', 0)
             transfers_cost = entry_history.get('event_transfers_cost', 0)
+            total_points = mgr_data.get('summary_overall_points', 0)
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             col1.metric("Manager", mgr_data.get('name', 'My Team'))
             col2.metric("Overall Rank", f"{mgr_data.get('summary_overall_rank', 0):,}")
-            col3.metric(f"GW {target_gw} Points", gw_points, delta=f"-{transfers_cost} pts hit" if transfers_cost > 0 else None, delta_color="inverse")
+            col3.metric("Total Points", f"{total_points:,}")
+            col4.metric(
+                f"GW {target_gw} Points", 
+                gw_points, 
+                delta=f"-{transfers_cost} pts hit" if transfers_cost > 0 else None, 
+                delta_color="inverse"
+            )
 
             # 4. Extract Squad Information
             picks_list = picks_data.get('picks', [])
@@ -251,7 +271,7 @@ with tab3:
             """
             squad_df = pd.read_sql(squad_query, conn, params=pick_ids)
 
-            # Map Pick metadata (Captain, Vice-Captain, Multiplier, Squad Order)
+            # Map Pick metadata
             meta_dict = {
                 p['element']: {
                     'multiplier': p['multiplier'],
@@ -270,7 +290,6 @@ with tab3:
             squad_df['Raw_GW_Pts'] = squad_df['id'].map(lambda x: live_points_map.get(x, 0))
             squad_df['GW_Points'] = squad_df['Raw_GW_Pts'] * squad_df['Multiplier']
 
-            # Label Captain / Vice Captain in the Player name
             def format_player_name(row):
                 name = row['Player']
                 if row['is_cap']:
@@ -295,7 +314,8 @@ with tab3:
                     use_container_width=True,
                     column_config={
                         "Cost": st.column_config.NumberColumn(format="£%.1f"),
-                        "GW_Points": st.column_config.NumberColumn(help=f"Points scored in Gameweek {target_gw} (Captain points doubled)")
+                        "GW_Points": st.column_config.NumberColumn(help=f"Points scored in Gameweek {target_gw} (Captain points doubled)"),
+                        "Season_Points": st.column_config.NumberColumn("Total Points")
                     }
                 )
 
@@ -334,7 +354,6 @@ with tab4:
     st.subheader("Live Transfer Market Trends")
     st.write("Track net transfers to anticipate price rises and falls before the midnight deadline.")
 
-    # 1. Query database for transfer volumes and price changes
     market_query = """
     SELECT 
         p.web_name AS Player,
@@ -349,21 +368,17 @@ with tab4:
     """
     market_df = pd.read_sql(market_query, conn)
 
-    # 2. Define the color-coding helper function
     def highlight_total_change(val):
         try:
             val = float(val)
             if val > 0:
-                # Green background for price rises
                 return 'background-color: rgba(39, 174, 96, 0.35)'
             elif val < 0:
-                # Red background for price drops
                 return 'background-color: rgba(231, 76, 60, 0.35)'
         except (ValueError, TypeError):
             pass
         return ''
 
-    # 3. Column configuration dictionary (reusable for both tables)
     col_config = {
         "Start_Price": st.column_config.NumberColumn("Start Price", format="£%.1f"),
         "Current_Price": st.column_config.NumberColumn("Current Price", format="£%.1f"),
@@ -375,23 +390,18 @@ with tab4:
         "Net_Transfers": st.column_config.NumberColumn("Net Transfers")
     }
 
-    # 4. Define our estimated threshold for a price change
     THRESHOLD = 60000
 
-    # 5. Split screen into two columns
     col_in, col_out = st.columns(2)
 
     with col_in:
         st.markdown("### 🔥 Heating Up (Likely to Rise)")
         top_in = market_df.head(20).copy()
-        
-        # Calculate Rise Progress (0 to 100%)
         top_in['Progress'] = (top_in['Net_Transfers'] / THRESHOLD) * 100
-        top_in['Progress'] = top_in['Progress'].clip(upper=100) # Cap at 100%
+        top_in['Progress'] = top_in['Progress'].clip(upper=100)
         
         styled_top_in = top_in.style.map(highlight_total_change, subset=['Total_Change'])
         
-        # Copy the base config and add the Progress bar
         col_config_in = col_config.copy()
         col_config_in["Progress"] = st.column_config.ProgressColumn(
             "Rise Probability",
@@ -412,8 +422,6 @@ with tab4:
         st.markdown("### ❄️ Cooling Down (Likely to Drop)")
         top_out = market_df.tail(20).copy()
         top_out = top_out.sort_values(by="Net_Transfers", ascending=True)
-        
-        # Calculate Fall Progress (Convert negative transfers to absolute numbers for the progress bar)
         top_out['Progress'] = (top_out['Net_Transfers'].abs() / THRESHOLD) * 100
         top_out['Progress'] = top_out['Progress'].clip(upper=100)
         
