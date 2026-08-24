@@ -1,0 +1,7 @@
+# Databases
+*.db
+fpl.db
+
+# Python Cache
+__pycache__/
+*.pyc
