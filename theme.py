@@ -14,9 +14,33 @@ html, body, [class*="css"] {
     background: #0a0a0a;
 }
 
-#MainMenu, footer, header[data-testid="stHeader"] {
+/* Hide default menu and footer, but keep header container transparent for the sidebar toggle */
+#MainMenu, footer {
     visibility: hidden;
     height: 0;
+}
+
+header[data-testid="stHeader"] {
+    background: transparent !important;
+    z-index: 100 !important;
+}
+
+/* Explicitly style and show the sidebar collapse/expand toggle button */
+[data-testid="stSidebarCollapsedControl"] {
+    display: flex !important;
+    visibility: visible !important;
+    z-index: 999999 !important;
+    color: #ffffff !important;
+    background-color: #141414 !important;
+    border: 1px solid #222 !important;
+    border-radius: 8px !important;
+    margin-left: 0.5rem !important;
+    margin-top: 0.5rem !important;
+}
+
+[data-testid="stSidebarCollapsedControl"]:hover {
+    background-color: #222 !important;
+    border-color: #333 !important;
 }
 
 .block-container {
