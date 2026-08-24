@@ -121,10 +121,6 @@ with st.sidebar:
         ],
     )
 
-    st.markdown('<div class="sidebar-card"><h4>Top xGI Leaders</h4></div>', unsafe_allow_html=True)
-    chart_data = top_xgi_df.set_index("web_name")["xgi"]
-    st.bar_chart(chart_data, color="#22c55e", height=180)
-
     if st.button("Refresh Data", width="stretch", type="primary"):
         with st.spinner("Fetching latest Premier League data..."):
             import fetch_data
