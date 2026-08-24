@@ -1,7 +1,8 @@
-import streamlit as st
+from pathlib import Path
 import sqlite3
 import pandas as pd
 import requests
+import streamlit as st
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 from theme import (
@@ -24,8 +25,47 @@ st.set_page_config(page_title="FPL Strategic Dashboard", layout="wide", initial_
 
 apply_theme()
 
-conn = sqlite3.connect("fpl.db")
+# ── Auto-Initialize Database ──────────────────────────────────────────────────
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "fpl.db"
 
+
+def ensure_database_ready():
+    """Checks if fpl.db exists and contains tables; if not, triggers fetch_data.py"""
+    needs_init = False
+
+    if not DB_PATH.exists() or DB_PATH.stat().st_size == 0:
+        needs_init = True
+    else:
+        try:
+            temp_conn = sqlite3.connect(DB_PATH)
+            table_check = pd.read_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='events'",
+                temp_conn,
+            )
+            temp_conn.close()
+            if table_check.empty:
+                needs_init = True
+        except Exception:
+            needs_init = True
+
+    if needs_init:
+        with st.spinner("Initializing database from official FPL API..."):
+            import fetch_data
+
+            if hasattr(fetch_data, "main"):
+                fetch_data.main()
+            elif hasattr(fetch_data, "fetch_all_data"):
+                fetch_data.fetch_all_data()
+            elif hasattr(fetch_data, "fetch_data"):
+                fetch_data.fetch_data()
+
+
+ensure_database_ready()
+
+conn = sqlite3.connect(DB_PATH)
+
+# ── Global Gameweek & Summary Queries ─────────────────────────────────────────
 events_df = pd.read_sql("SELECT id, name, is_current, is_next FROM events", conn)
 next_gw_row = events_df[events_df["is_next"] == 1]
 current_gw_row = events_df[events_df["is_current"] == 1]
@@ -63,27 +103,42 @@ with st.sidebar:
     st.markdown(f'<span class="gw-badge">NEXT · {gw_name}</span>', unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
-    render_sidebar_card("Season Overview", [
-        ("Gameweek", gw_name),
-        ("Players Tracked", f"{int(summary_df['total'].values[0]):,}"),
-        ("Buy Signals", f"{int(summary_df['buy_signals'].values[0]):,}"),
-        ("Sell Signals", f"{int(summary_df['sell_signals'].values[0]):,}"),
-    ])
+    render_sidebar_card(
+        "Season Overview",
+        [
+            ("Gameweek", gw_name),
+            ("Players Tracked", f"{int(summary_df['total'].values[0]):,}"),
+            ("Buy Signals", f"{int(summary_df['buy_signals'].values[0]):,}"),
+            ("Sell Signals", f"{int(summary_df['sell_signals'].values[0]):,}"),
+        ],
+    )
 
-    render_sidebar_card("Transfer Market", [
-        ("Heating Up", f"{int(summary_df['heating'].values[0]):,}"),
-        ("Cooling Down", f"{int(summary_df['cooling'].values[0]):,}"),
-    ])
+    render_sidebar_card(
+        "Transfer Market",
+        [
+            ("Heating Up", f"{int(summary_df['heating'].values[0]):,}"),
+            ("Cooling Down", f"{int(summary_df['cooling'].values[0]):,}"),
+        ],
+    )
 
     st.markdown('<div class="sidebar-card"><h4>Top xGI Leaders</h4></div>', unsafe_allow_html=True)
     chart_data = top_xgi_df.set_index("web_name")["xgi"]
     st.bar_chart(chart_data, color="#22c55e", height=180)
 
     if st.button("Refresh Data", width="stretch", type="primary"):
+        with st.spinner("Fetching latest Premier League data..."):
+            import fetch_data
+
+            if hasattr(fetch_data, "main"):
+                fetch_data.main()
+            elif hasattr(fetch_data, "fetch_all_data"):
+                fetch_data.fetch_all_data()
+            elif hasattr(fetch_data, "fetch_data"):
+                fetch_data.fetch_data()
         st.cache_data.clear()
         st.rerun()
 
-# ── Main header ──────────────────────────────────────────────────────────────
+# ── Main Header ──────────────────────────────────────────────────────────────
 render_top_bar(f"Strategic analytics · {gw_name}")
 
 header_left, header_right = st.columns([4, 1])
@@ -102,24 +157,25 @@ with header_right:
         unsafe_allow_html=True,
     )
 
-tab1, tab2, tab3, tab4 = st.tabs([
-    "Expected Stats",
-    "Fixture Ticker",
-    "Squad Analyzer",
-    "Transfer Market",
-])
+tab1, tab2, tab3, tab4 = st.tabs(
+    [
+        "Expected Stats",
+        "Fixture Ticker",
+        "Squad Analyzer",
+        "Transfer Market",
+    ]
+)
 
 # ── TAB 1 ────────────────────────────────────────────────────────────────────
 with tab1:
     section_header("Expected Stats & Underperformance", "Identify high-value and unlucky assets")
 
-    # Filter controls layout with Search Bar
     col_search, col1, col2, col3 = st.columns([1.5, 1, 1, 1])
     with col_search:
         search_query = st.text_input(
-            "🔍 Search Player / Club", 
+            "🔍 Search Player / Club",
             placeholder="e.g. Wirtz, Haaland, Arsenal, MCI...",
-            key="tab1_search"
+            key="tab1_search",
         )
     with col1:
         min_minutes = st.slider("Minimum Minutes Played", 0, 900, 0, step=45)
@@ -168,14 +224,26 @@ with tab1:
     WHERE p.minutes >= {min_minutes} {pos_clause}
     """
     df_xgi = pd.read_sql(query, conn)
-    for col_name in ("Price", "Minutes", "Total_Points", "Goals", "Assists", "Clean_Sheets", "Saves", "xG", "xA", "xGI", "xG_Delta", "xGI_per_90"):
+    for col_name in (
+        "Price",
+        "Minutes",
+        "Total_Points",
+        "Goals",
+        "Assists",
+        "Clean_Sheets",
+        "Saves",
+        "xG",
+        "xA",
+        "xGI",
+        "xG_Delta",
+        "xGI_per_90",
+    ):
         df_xgi[col_name] = pd.to_numeric(df_xgi[col_name], errors="coerce")
 
-    # Apply search filter (case-insensitive across Player name and Club)
     if search_query.strip():
         df_xgi = df_xgi[
-            df_xgi["Player"].str.contains(search_query, case=False, na=False) |
-            df_xgi["Team"].str.contains(search_query, case=False, na=False)
+            df_xgi["Player"].str.contains(search_query, case=False, na=False)
+            | df_xgi["Team"].str.contains(search_query, case=False, na=False)
         ]
 
     sort_map = {
@@ -192,7 +260,6 @@ with tab1:
     if df_xgi.empty:
         st.info(f"No players found matching '{search_query}'. Try adjusting your search term or filters.")
     else:
-        # Render spotlight cards
         top_cards = df_xgi.head(min(5, len(df_xgi)))
         card_cols = st.columns(len(top_cards))
         for i, (_, row) in enumerate(top_cards.iterrows()):
@@ -299,7 +366,7 @@ with tab2:
         render_list_card(
             row["Team"],
             [tag, (f"Rating {rating}", "gray")],
-            f'<span>Fixtures</span> {fixtures_str}',
+            f"<span>Fixtures</span> {fixtures_str}",
         )
 
     st.dataframe(ticker_df, width="stretch")
