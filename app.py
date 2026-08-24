@@ -113,7 +113,14 @@ tab1, tab2, tab3, tab4 = st.tabs([
 with tab1:
     section_header("Expected Stats & Underperformance", "Identify high-value and unlucky assets")
 
-    col1, col2, col3 = st.columns([1, 1, 1])
+    # Filter controls layout with Search Bar
+    col_search, col1, col2, col3 = st.columns([1.5, 1, 1, 1])
+    with col_search:
+        search_query = st.text_input(
+            "🔍 Search Player / Club", 
+            placeholder="e.g. Wirtz, Haaland, Arsenal, MCI...",
+            key="tab1_search"
+        )
     with col1:
         min_minutes = st.slider("Minimum Minutes Played", 0, 900, 0, step=45)
     with col2:
@@ -164,6 +171,13 @@ with tab1:
     for col_name in ("Price", "Minutes", "Total_Points", "Goals", "Assists", "Clean_Sheets", "Saves", "xG", "xA", "xGI", "xG_Delta", "xGI_per_90"):
         df_xgi[col_name] = pd.to_numeric(df_xgi[col_name], errors="coerce")
 
+    # Apply search filter (case-insensitive across Player name and Club)
+    if search_query.strip():
+        df_xgi = df_xgi[
+            df_xgi["Player"].str.contains(search_query, case=False, na=False) |
+            df_xgi["Team"].str.contains(search_query, case=False, na=False)
+        ]
+
     sort_map = {
         "Expected Goal Involvements (xGI)": ("xGI", False),
         "Goals Below Expected (Unlucky)": ("xG_Delta", False),
@@ -175,55 +189,59 @@ with tab1:
     col, asc = sort_map[sort_by]
     df_xgi = df_xgi.sort_values(by=col, ascending=asc)
 
-    top_cards = df_xgi.head(5)
-    card_cols = st.columns(5)
-    for i, (_, row) in enumerate(top_cards.iterrows()):
-        delta = float(row["xG_Delta"])
-        if delta >= 0.5:
-            signal_tag = ("Buy Signal", "green")
-        elif delta <= -0.5:
-            signal_tag = ("Sell Signal", "red")
-        else:
-            signal_tag = ("Neutral", "gray")
-        with card_cols[i]:
-            render_list_card(
-                f"{row['Player']} ({row['Team']})",
-                [(row["Pos"], "blue"), signal_tag],
-                f'<span>Price</span> £{fmt_num(row["Price"], ".1f")} · <span>xGI</span> {fmt_num(row["xGI"])} · <span>Pts</span> {int(float(row["Total_Points"]))} · <span>ΔxG</span> {fmt_num(delta, "+.2f")}',
-            )
+    if df_xgi.empty:
+        st.info(f"No players found matching '{search_query}'. Try adjusting your search term or filters.")
+    else:
+        # Render spotlight cards
+        top_cards = df_xgi.head(min(5, len(df_xgi)))
+        card_cols = st.columns(len(top_cards))
+        for i, (_, row) in enumerate(top_cards.iterrows()):
+            delta = float(row["xG_Delta"])
+            if delta >= 0.5:
+                signal_tag = ("Buy Signal", "green")
+            elif delta <= -0.5:
+                signal_tag = ("Sell Signal", "red")
+            else:
+                signal_tag = ("Neutral", "gray")
+            with card_cols[i]:
+                render_list_card(
+                    f"{row['Player']} ({row['Team']})",
+                    [(row["Pos"], "blue"), signal_tag],
+                    f'<span>Price</span> £{fmt_num(row["Price"], ".1f")} · <span>xGI</span> {fmt_num(row["xGI"])} · <span>Pts</span> {int(float(row["Total_Points"]))} · <span>ΔxG</span> {fmt_num(delta, "+.2f")}',
+                )
 
-    def highlight_xg_delta(val):
-        try:
-            val = float(val)
-            if val >= 0.5:
-                return "background-color: rgba(34, 197, 94, 0.25)"
-            if val > 0:
-                return "background-color: rgba(34, 197, 94, 0.1)"
-            if val <= -0.5:
-                return "background-color: rgba(239, 68, 68, 0.2)"
-        except (ValueError, TypeError):
-            pass
-        return ""
+        def highlight_xg_delta(val):
+            try:
+                val = float(val)
+                if val >= 0.5:
+                    return "background-color: rgba(34, 197, 94, 0.25)"
+                if val > 0:
+                    return "background-color: rgba(34, 197, 94, 0.1)"
+                if val <= -0.5:
+                    return "background-color: rgba(239, 68, 68, 0.2)"
+            except (ValueError, TypeError):
+                pass
+            return ""
 
-    st.dataframe(
-        df_xgi.head(25).style.map(highlight_xg_delta, subset=["xG_Delta"]),
-        hide_index=True,
-        width="stretch",
-        column_config={
-            "Price": st.column_config.NumberColumn(format="£%.1f"),
-            "Minutes": st.column_config.NumberColumn("Mins"),
-            "Total_Points": st.column_config.NumberColumn("Pts"),
-            "Goals": st.column_config.NumberColumn("G"),
-            "Assists": st.column_config.NumberColumn("A"),
-            "Clean_Sheets": st.column_config.NumberColumn("CS"),
-            "Saves": st.column_config.NumberColumn("Saves"),
-            "xG": st.column_config.NumberColumn(format="%.2f"),
-            "xA": st.column_config.NumberColumn(format="%.2f"),
-            "xGI": st.column_config.NumberColumn(format="%.2f"),
-            "xG_Delta": st.column_config.NumberColumn(format="%.2f"),
-            "xGI_per_90": st.column_config.NumberColumn("xGI/90", format="%.2f"),
-        },
-    )
+        st.dataframe(
+            df_xgi.head(25).style.map(highlight_xg_delta, subset=["xG_Delta"]),
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "Price": st.column_config.NumberColumn(format="£%.1f"),
+                "Minutes": st.column_config.NumberColumn("Mins"),
+                "Total_Points": st.column_config.NumberColumn("Pts"),
+                "Goals": st.column_config.NumberColumn("G"),
+                "Assists": st.column_config.NumberColumn("A"),
+                "Clean_Sheets": st.column_config.NumberColumn("CS"),
+                "Saves": st.column_config.NumberColumn("Saves"),
+                "xG": st.column_config.NumberColumn(format="%.2f"),
+                "xA": st.column_config.NumberColumn(format="%.2f"),
+                "xGI": st.column_config.NumberColumn(format="%.2f"),
+                "xG_Delta": st.column_config.NumberColumn(format="%.2f"),
+                "xGI_per_90": st.column_config.NumberColumn("xGI/90", format="%.2f"),
+            },
+        )
 
 # ── TAB 2 ────────────────────────────────────────────────────────────────────
 with tab2:
