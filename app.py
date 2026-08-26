@@ -47,11 +47,17 @@ if GA_MEASUREMENT_ID:
       gtag('js', new Date());
       gtag('config', '{GA_MEASUREMENT_ID}', {{
           'send_page_view': true,
+          'page_location': document.referrer || window.location.href,
+          'page_title': 'FPL Strategic Dashboard',
           'cookie_flags': 'SameSite=None;Secure'
       }});
     </script>
     """
-    components.html(ga_tracking_code, height=0, width=0)
+    components.html(
+        f"<div style='display:none;'>{ga_tracking_code}</div>",
+        height=0,
+        width=0,
+    )
 
 # ── Auto-Initialize Database ──────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
@@ -753,9 +759,22 @@ with tab3:
                 * **(H) vs. (A):** Designates Home or Away fixtures. Home games offer historically higher clean sheet and scoring conversion probabilities.
                 * 🟢 **Green Run (≤10 pts):** Prime fixture swings. Prioritize attacking transfers and defensive double-ups.
                 * 🔴 **Tough Run (≥15 pts):** Hold off buying assets from these clubs until their schedule clears.
+                * 🔍 **Search & Squad Filter:** Searching a player filters by their respective club; enabling squad filter isolates clubs of your 15 players.
                 """
             )
 
+    col_search3, col_sq3 = st.columns([2, 1])
+    with col_search3:
+        search_query3 = st.text_input(
+            "🔍 Search Player / Club",
+            placeholder="e.g. Saka, Arsenal, Haaland, MCI...",
+            key="tab3_search",
+        )
+    with col_sq3:
+        st.markdown("<div style='margin-top: 1.8rem;'></div>", unsafe_allow_html=True)
+        only_my_squad_tab3 = st.checkbox("🎯 Only My Squad Clubs", key="tab3_only_squad")
+
+    # Fixture queries
     fixtures_query = """
     SELECT
         f.event AS GW,
@@ -771,7 +790,46 @@ with tab3:
     """
     fixtures_df = pd.read_sql(fixtures_query, conn, params=[current_gw, current_gw + 5])
 
+    # Player-to-Team mapping table for flexible player/club searches
+    pt_lookup = pd.read_sql(
+        """
+        SELECT 
+            p.id AS element_id, 
+            p.web_name, 
+            p.first_name || ' ' || p.second_name AS full_name,
+            t.short_name, 
+            t.name AS club_name
+        FROM players p
+        INNER JOIN teams t ON p.team = t.id
+        """,
+        conn,
+    )
+
     teams_list = pd.read_sql("SELECT short_name FROM teams ORDER BY name", conn)["short_name"].tolist()
+    target_team_short_names = set(teams_list)
+
+    # Filter clubs by manager squad
+    if only_my_squad_tab3:
+        active_manager_id_tab3 = st.session_state.get("manager_id", "").strip()
+        if not active_manager_id_tab3:
+            st.info("💡 Enter your FPL Team ID in the sidebar or Tab 4 to filter by your squad.")
+            target_team_short_names = set()
+        else:
+            squad_ids_tab3 = get_manager_squad_ids(active_manager_id_tab3, current_gw)
+            squad_teams = pt_lookup[pt_lookup["element_id"].isin(squad_ids_tab3)]["short_name"].unique()
+            target_team_short_names = target_team_short_names.intersection(set(squad_teams))
+
+    # Filter clubs by search query (checks player name, full name, club name, and club code)
+    if search_query3.strip():
+        q3 = search_query3.strip().lower()
+        matching_from_lookup = pt_lookup[
+            pt_lookup["web_name"].str.contains(q3, case=False, na=False)
+            | pt_lookup["full_name"].str.contains(q3, case=False, na=False)
+            | pt_lookup["short_name"].str.contains(q3, case=False, na=False)
+            | pt_lookup["club_name"].str.contains(q3, case=False, na=False)
+        ]["short_name"].unique()
+        target_team_short_names = target_team_short_names.intersection(set(matching_from_lookup))
+
     ticker_data = []
     gw_cols = [f"GW {gw}" for gw in range(current_gw, current_gw + 5)]
 
@@ -801,58 +859,64 @@ with tab3:
 
     ticker_df = pd.DataFrame(ticker_data).sort_values(by="Difficulty Rating", ascending=True)
 
-    easy_teams = ticker_df.head(5)
-    for _, row in easy_teams.iterrows():
-        fixtures_str = " · ".join(row[f"GW {gw}"] for gw in range(current_gw, current_gw + 5))
-        rating = row["Difficulty Rating"]
-        tag = ("Easy Run", "green") if rating <= 10 else ("Moderate", "yellow")
-        render_list_card(
-            row["Team"],
-            [tag, (f"Rating {rating}", "gray")],
-            f"<span>Fixtures</span> {fixtures_str}",
+    # Apply club filter
+    ticker_df = ticker_df[ticker_df["Team"].isin(target_team_short_names)]
+
+    if ticker_df.empty:
+        st.info("No clubs found matching your search or squad criteria.")
+    else:
+        easy_teams = ticker_df.head(min(5, len(ticker_df)))
+        for _, row in easy_teams.iterrows():
+            fixtures_str = " · ".join(row[f"GW {gw}"] for gw in range(current_gw, current_gw + 5))
+            rating = row["Difficulty Rating"]
+            tag = ("Easy Run", "green") if rating <= 10 else ("Moderate", "yellow")
+            render_list_card(
+                row["Team"],
+                [tag, (f"Rating {rating}", "gray")],
+                f"<span>Fixtures</span> {fixtures_str}",
+            )
+
+        def style_fdr_cell(val):
+            val_str = str(val)
+            if "[2]" in val_str:
+                return "background-color: rgba(34, 197, 94, 0.25); color: #4ade80; font-weight: 600; text-align: center;"
+            elif "[3]" in val_str:
+                return "background-color: rgba(100, 116, 139, 0.15); color: #cbd5e1; text-align: center;"
+            elif "[4]" in val_str:
+                return "background-color: rgba(249, 115, 22, 0.25); color: #fb923c; font-weight: 600; text-align: center;"
+            elif "[5]" in val_str:
+                return "background-color: rgba(239, 68, 68, 0.3); color: #f87171; font-weight: 700; text-align: center;"
+            elif "Blank" in val_str:
+                return "background-color: rgba(15, 23, 42, 0.5); color: #64748b; font-style: italic; text-align: center;"
+            return "text-align: center;"
+
+        def style_rating_col(val):
+            try:
+                v = int(val)
+                if v <= 11:
+                    return "background-color: rgba(34, 197, 94, 0.25); color: #22c55e; font-weight: bold; text-align: center;"
+                elif v <= 14:
+                    return "background-color: rgba(234, 179, 8, 0.2); color: #eab308; font-weight: bold; text-align: center;"
+                else:
+                    return "background-color: rgba(239, 68, 68, 0.25); color: #ef4444; font-weight: bold; text-align: center;"
+            except Exception:
+                return ""
+
+        styled_ticker = (
+            ticker_df.style
+            .map(style_fdr_cell, subset=gw_cols)
+            .map(style_rating_col, subset=["Difficulty Rating"])
         )
 
-    def style_fdr_cell(val):
-        val_str = str(val)
-        if "[2]" in val_str:
-            return "background-color: rgba(34, 197, 94, 0.25); color: #4ade80; font-weight: 600; text-align: center;"
-        elif "[3]" in val_str:
-            return "background-color: rgba(100, 116, 139, 0.15); color: #cbd5e1; text-align: center;"
-        elif "[4]" in val_str:
-            return "background-color: rgba(249, 115, 22, 0.25); color: #fb923c; font-weight: 600; text-align: center;"
-        elif "[5]" in val_str:
-            return "background-color: rgba(239, 68, 68, 0.3); color: #f87171; font-weight: 700; text-align: center;"
-        elif "Blank" in val_str:
-            return "background-color: rgba(15, 23, 42, 0.5); color: #64748b; font-style: italic; text-align: center;"
-        return "text-align: center;"
-
-    def style_rating_col(val):
-        try:
-            v = int(val)
-            if v <= 11:
-                return "background-color: rgba(34, 197, 94, 0.25); color: #22c55e; font-weight: bold; text-align: center;"
-            elif v <= 14:
-                return "background-color: rgba(234, 179, 8, 0.2); color: #eab308; font-weight: bold; text-align: center;"
-            else:
-                return "background-color: rgba(239, 68, 68, 0.25); color: #ef4444; font-weight: bold; text-align: center;"
-        except Exception:
-            return ""
-
-    styled_ticker = (
-        ticker_df.style
-        .map(style_fdr_cell, subset=gw_cols)
-        .map(style_rating_col, subset=["Difficulty Rating"])
-    )
-
-    st.dataframe(
-        styled_ticker,
-        hide_index=True,
-        width="stretch",
-        column_config={
-            "Team": st.column_config.TextColumn("Club"),
-            "Difficulty Rating": st.column_config.NumberColumn("Total FDR (5 GW)"),
-        },
-    )
+        st.dataframe(
+            styled_ticker,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "Team": st.column_config.TextColumn("Club"),
+                "Difficulty Rating": st.column_config.NumberColumn("Total FDR (5 GW)"),
+            },
+        )
 
 # ── TAB 4: Squad Analyzer ────────────────────────────────────────────────────
 with tab4:
@@ -1074,13 +1138,28 @@ with tab5:
                 * 📈 **Heating Up (Green):** Rapid inbound transfers. Crossing the threshold triggers a **+£0.1m price rise** at 01:30 GMT.
                 * 📉 **Cooling Down (Red):** Heavy selling momentum. Indicates an impending **-£0.1m price drop**.
                 * **Strategy:** Buy targets early in the gameweek before their price rises, and sell red-flagged assets before value is eroded.
+                * 🔍 **Search & Squad Filter:** Search specific targets or check the squad box to monitor transfer trends across your 15 players.
                 """
             )
 
+    col_search5, col_sq5 = st.columns([2, 1])
+    with col_search5:
+        search_query5 = st.text_input(
+            "🔍 Search Player / Club",
+            placeholder="e.g. Palmer, Chelsea, Haaland, MCI...",
+            key="tab5_search",
+        )
+    with col_sq5:
+        st.markdown("<div style='margin-top: 1.8rem;'></div>", unsafe_allow_html=True)
+        only_my_squad_tab5 = st.checkbox("🎯 Only My Squad Players", key="tab5_only_squad")
+
     market_query = """
     SELECT
+        p.id AS element_id,
         p.web_name AS Player,
+        p.first_name || ' ' || p.second_name AS Full_Name,
         t.short_name AS Team,
+        t.name AS Club_Name,
         (p.now_cost - p.cost_change_start) / 10.0 AS Start_Price,
         p.now_cost / 10.0 AS Current_Price,
         p.cost_change_start / 10.0 AS Total_Change,
@@ -1094,32 +1173,62 @@ with tab5:
         market_df[col_name] = pd.to_numeric(market_df[col_name], errors="coerce")
     THRESHOLD = 60000
 
-    col_in, col_out = st.columns(2)
+    # Filter market by manager squad
+    if only_my_squad_tab5:
+        active_manager_id_tab5 = st.session_state.get("manager_id", "").strip()
+        if not active_manager_id_tab5:
+            st.info("💡 Enter your FPL Team ID in the sidebar or Tab 4 to filter by your squad.")
+            market_df = market_df.iloc[0:0]
+        else:
+            squad_ids_tab5 = get_manager_squad_ids(active_manager_id_tab5, current_gw)
+            market_df = market_df[market_df["element_id"].isin(squad_ids_tab5)]
 
-    with col_in:
-        st.markdown("#### Heating Up")
-        for _, row in market_df.head(10).iterrows():
-            progress = min((row["Net_Transfers"] / THRESHOLD) * 100, 100)
-            change_tag = ("Rising", "green") if row["Total_Change"] > 0 else ("Flat", "gray")
-            render_list_card(
-                f"{row['Player']} · {row['Team']}",
-                [("Transfer In", "green"), change_tag],
-                f'<span>Price</span> £{fmt_num(row["Current_Price"], ".1f")} · <span>Change</span> {fmt_num(row["Total_Change"], "+.1f")}m · <span>Net</span> {int(float(row["Net_Transfers"])):,}',
-                progress=progress,
-            )
+    # Filter market by search query
+    if search_query5.strip():
+        q5 = search_query5.strip()
+        market_df = market_df[
+            market_df["Player"].str.contains(q5, case=False, na=False)
+            | market_df["Full_Name"].str.contains(q5, case=False, na=False)
+            | market_df["Team"].str.contains(q5, case=False, na=False)
+            | market_df["Club_Name"].str.contains(q5, case=False, na=False)
+        ]
 
-    with col_out:
-        st.markdown("#### Cooling Down")
-        bottom = market_df.tail(10).sort_values(by="Net_Transfers", ascending=True)
-        for _, row in bottom.iterrows():
-            progress = min((abs(row["Net_Transfers"]) / THRESHOLD) * 100, 100)
-            change_tag = ("Falling", "red") if row["Total_Change"] < 0 else ("Flat", "gray")
-            render_list_card(
-                f"{row['Player']} · {row['Team']}",
-                [("Transfer Out", "red"), change_tag],
-                f'<span>Price</span> £{fmt_num(row["Current_Price"], ".1f")} · <span>Change</span> {fmt_num(row["Total_Change"], "+.1f")}m · <span>Net</span> {int(float(row["Net_Transfers"])):,}',
-                progress=progress,
-                progress_red=True,
-            )
+    if market_df.empty:
+        st.info("No players found matching your transfer search or squad filter criteria.")
+    else:
+        col_in, col_out = st.columns(2)
+
+        with col_in:
+            st.markdown("#### Heating Up")
+            heating_df = market_df.head(10)
+            if heating_df.empty:
+                st.write("No matching players heating up.")
+            else:
+                for _, row in heating_df.iterrows():
+                    progress = min((max(0, row["Net_Transfers"]) / THRESHOLD) * 100, 100)
+                    change_tag = ("Rising", "green") if row["Total_Change"] > 0 else ("Flat", "gray")
+                    render_list_card(
+                        f"{row['Player']} · {row['Team']}",
+                        [("Transfer In", "green"), change_tag],
+                        f'<span>Price</span> £{fmt_num(row["Current_Price"], ".1f")} · <span>Change</span> {fmt_num(row["Total_Change"], "+.1f")}m · <span>Net</span> {int(float(row["Net_Transfers"])):,}',
+                        progress=progress,
+                    )
+
+        with col_out:
+            st.markdown("#### Cooling Down")
+            cooling_df = market_df.tail(10).sort_values(by="Net_Transfers", ascending=True)
+            if cooling_df.empty:
+                st.write("No matching players cooling down.")
+            else:
+                for _, row in cooling_df.iterrows():
+                    progress = min((abs(min(0, row["Net_Transfers"])) / THRESHOLD) * 100, 100)
+                    change_tag = ("Falling", "red") if row["Total_Change"] < 0 else ("Flat", "gray")
+                    render_list_card(
+                        f"{row['Player']} · {row['Team']}",
+                        [("Transfer Out", "red"), change_tag],
+                        f'<span>Price</span> £{fmt_num(row["Current_Price"], ".1f")} · <span>Change</span> {fmt_num(row["Total_Change"], "+.1f")}m · <span>Net</span> {int(float(row["Net_Transfers"])):,}',
+                        progress=progress,
+                        progress_red=True,
+                    )
 
 conn.close()
