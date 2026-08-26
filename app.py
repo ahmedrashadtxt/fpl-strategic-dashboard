@@ -1,9 +1,11 @@
+import os
 from pathlib import Path
 import sqlite3
 import pandas as pd
 import plotly.express as px
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 from theme import (
@@ -29,6 +31,27 @@ st.set_page_config(
 )
 
 apply_theme()
+
+# ── Google Analytics 4 (From Secrets / Env) ──────────────────────────────────
+GA_MEASUREMENT_ID = st.secrets.get(
+    "GA_MEASUREMENT_ID", os.getenv("GA_MEASUREMENT_ID", "")
+)
+
+if GA_MEASUREMENT_ID:
+    ga_tracking_code = f"""
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){{dataLayer.push(arguments);}}
+      gtag('js', new Date());
+      gtag('config', '{GA_MEASUREMENT_ID}', {{
+          'send_page_view': true,
+          'cookie_flags': 'SameSite=None;Secure'
+      }});
+    </script>
+    """
+    components.html(ga_tracking_code, height=0, width=0)
 
 # ── Auto-Initialize Database ──────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
@@ -209,7 +232,23 @@ pos_map = {"GKP": 1, "DEF": 2, "MID": 3, "FWD": 4}
 
 # ── TAB 1: Expected Stats ────────────────────────────────────────────────────
 with tab1:
-    section_header("Expected Stats & Underperformance", "Identify high-value and unlucky assets")
+    col_t1_hdr, col_t1_pop = st.columns([6, 1])
+    with col_t1_hdr:
+        section_header("Expected Stats & Underperformance", "Identify high-value and unlucky assets")
+    with col_t1_pop:
+        st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
+        with st.popover("📖 Guide"):
+            st.markdown(
+                """
+                **Expected Stats & Regression Guide**
+                
+                * **xG / xA / xGI:** Expected Goals, Assists, and Goal Involvements based on shot location and chance quality.
+                * **ΔxG (xG Delta):** Calculated as `xG - Actual Goals`.
+                    * 🟢 **Buy Signal (ΔxG ≥ +0.5):** Creating/receiving high-quality chances but unlucky with finishing. Positive scoring regression expected.
+                    * 🔴 **Sell Signal (ΔxG ≤ -0.5):** Outperforming underlying metrics significantly. Current scoring conversion is historically unsustainable.
+                * **xGI / 90:** Normalizes chance involvement per 90 minutes played to spot high-impact assets with managed minutes.
+                """
+            )
 
     col_search, col1, col2, col3 = st.columns([1.5, 1, 1, 1])
     with col_search:
@@ -389,7 +428,34 @@ with tab1:
 
 # ── TAB 2: Rolling Form & Scatter Plot ────────────────────────────────────────
 with tab2:
-    section_header("Rolling Form & Trends", "Analyze form trajectory vs upcoming fixture schedule")
+    col_t2_hdr, col_t2_pop = st.columns([6, 1])
+    with col_t2_hdr:
+        section_header("Rolling Form & Trends", "Analyze form trajectory vs upcoming fixture schedule")
+    with col_t2_pop:
+        st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
+        with st.popover("📖 Guide"):
+            st.markdown(
+                """
+                **Form vs. Fixtures Scatter Matrix**
+                
+                * **Y-Axis (Rolling Sum xGI):** Total attacking threat accumulated across the selected match window.
+                * **X-Axis (Upcoming 5-GW FDR):** Total fixture difficulty rating over the next 5 games (lower score = easier schedule).
+                * **Min Matches Filter (e.g. ≥ 3):** Filters out rotational cameos and short injury returns so you only evaluate nailed starters with meaningful sample sizes.
+                
+                ---
+                
+                **How to Read the Quadrants (Example with Min 3 Matches):**
+                
+                * 🔥 **Top-Left (High Form + Easy Fixtures) → Prime Buys**
+                  * *Example:* **Bukayo Saka / Erling Haaland** — Sustained high xGI entering weak defensive matchups. Priority transfer-in targets and top captaincy options.
+                * ⚠️ **Top-Right (High Form + Tough Fixtures) → Hold, Don't Buy**
+                  * *Example:* **Mohamed Salah / Cole Palmer** — Generating strong underlying chances but facing top-4 defenses. Keep if owned, but avoid captaining over Top-Left assets.
+                * 🛡️ **Bottom-Left (Low Form + Easy Fixtures) → Budget Enablers**
+                  * *Example:* **Declan Rice / 4.5m Midfielders** — Consistent starters with low individual attacking output entering easier runs. Safe minutes floor, low haul ceiling.
+                * ❌ **Bottom-Right (Low Form + Tough Fixtures) → Sell Candidates**
+                  * *Example:* Struggling attackers from low-scoring sides facing difficult schedules. Priority transfer-out candidates.
+                """
+            )
 
     table_exists = pd.read_sql(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='player_match_history'",
@@ -673,7 +739,22 @@ with tab2:
 
 # ── TAB 3: Fixture Ticker ────────────────────────────────────────────────────
 with tab3:
-    section_header(f"Fixture Difficulty · GW{current_gw}–{current_gw + 4}", "Upcoming schedule ranked by difficulty")
+    col_t3_hdr, col_t3_pop = st.columns([6, 1])
+    with col_t3_hdr:
+        section_header(f"Fixture Difficulty · GW{current_gw}–{current_gw + 4}", "Upcoming schedule ranked by difficulty")
+    with col_t3_pop:
+        st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
+        with st.popover("📖 Guide"):
+            st.markdown(
+                """
+                **Fixture Ticker Guide**
+                
+                * **Difficulty Rating:** Sum of official FDR scores across the next 5 gameweeks.
+                * **(H) vs. (A):** Designates Home or Away fixtures. Home games offer historically higher clean sheet and scoring conversion probabilities.
+                * 🟢 **Green Run (≤10 pts):** Prime fixture swings. Prioritize attacking transfers and defensive double-ups.
+                * 🔴 **Tough Run (≥15 pts):** Hold off buying assets from these clubs until their schedule clears.
+                """
+            )
 
     fixtures_query = """
     SELECT
@@ -692,6 +773,7 @@ with tab3:
 
     teams_list = pd.read_sql("SELECT short_name FROM teams ORDER BY name", conn)["short_name"].tolist()
     ticker_data = []
+    gw_cols = [f"GW {gw}" for gw in range(current_gw, current_gw + 5)]
 
     for team in teams_list:
         row = {"Team": team}
@@ -730,11 +812,66 @@ with tab3:
             f"<span>Fixtures</span> {fixtures_str}",
         )
 
-    st.dataframe(ticker_df, width="stretch")
+    def style_fdr_cell(val):
+        val_str = str(val)
+        if "[2]" in val_str:
+            return "background-color: rgba(34, 197, 94, 0.25); color: #4ade80; font-weight: 600; text-align: center;"
+        elif "[3]" in val_str:
+            return "background-color: rgba(100, 116, 139, 0.15); color: #cbd5e1; text-align: center;"
+        elif "[4]" in val_str:
+            return "background-color: rgba(249, 115, 22, 0.25); color: #fb923c; font-weight: 600; text-align: center;"
+        elif "[5]" in val_str:
+            return "background-color: rgba(239, 68, 68, 0.3); color: #f87171; font-weight: 700; text-align: center;"
+        elif "Blank" in val_str:
+            return "background-color: rgba(15, 23, 42, 0.5); color: #64748b; font-style: italic; text-align: center;"
+        return "text-align: center;"
+
+    def style_rating_col(val):
+        try:
+            v = int(val)
+            if v <= 11:
+                return "background-color: rgba(34, 197, 94, 0.25); color: #22c55e; font-weight: bold; text-align: center;"
+            elif v <= 14:
+                return "background-color: rgba(234, 179, 8, 0.2); color: #eab308; font-weight: bold; text-align: center;"
+            else:
+                return "background-color: rgba(239, 68, 68, 0.25); color: #ef4444; font-weight: bold; text-align: center;"
+        except Exception:
+            return ""
+
+    styled_ticker = (
+        ticker_df.style
+        .map(style_fdr_cell, subset=gw_cols)
+        .map(style_rating_col, subset=["Difficulty Rating"])
+    )
+
+    st.dataframe(
+        styled_ticker,
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Team": st.column_config.TextColumn("Club"),
+            "Difficulty Rating": st.column_config.NumberColumn("Total FDR (5 GW)"),
+        },
+    )
 
 # ── TAB 4: Squad Analyzer ────────────────────────────────────────────────────
 with tab4:
-    section_header("Manager Squad Analyzer", "Import your FPL team ID to analyze your squad")
+    col_t4_hdr, col_t4_pop = st.columns([6, 1])
+    with col_t4_hdr:
+        section_header("Manager Squad Analyzer", "Import your FPL team ID to analyze your squad")
+    with col_t4_pop:
+        st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
+        with st.popover("📖 Guide"):
+            st.markdown(
+                """
+                **Manager Squad Sync Guide**
+                
+                * **FPL Team ID:** Enter your manager ID from the official FPL URL (`fantasy.premierleague.com/entry/XXXXXX/event/...`).
+                * **Starting XI vs. Bench:** Automatically segregates and displays your active Starting 11 (order 1–11) and your 4 bench substitutes in priority order.
+                * **Multipliers:** Accurately applies your Captain (2x) and Vice-Captain scoring multipliers with clear indicator badges.
+                * **Squad News Tracker:** Flags live press-conference injury updates, suspensions, and percent chance of playing.
+                """
+            )
 
     tab4_manager_id = st.text_input(
         "FPL Team / Entry ID",
@@ -828,14 +965,25 @@ with tab4:
             col_squad, col_news = st.columns([7, 3])
 
             with col_squad:
-                for _, row in squad_df.iterrows():
+                starters = squad_df[squad_df["order"] <= 11]
+                bench = squad_df[squad_df["order"] > 11]
+
+                st.markdown("#### ⚽ Starting XI")
+                for _, row in starters.iterrows():
                     tags = [(row["Position"], "blue")]
-                    if row["is_cap"]:
+                    mult_info = ""
+
+                    if row["Multiplier"] == 2:
+                        tags.append(("Captain (2x)", "green"))
+                        mult_info = " (2x)"
+                    elif row["Multiplier"] == 3:
+                        tags.append(("Triple Captain (3x)", "green"))
+                        mult_info = " (3x)"
+                    elif row["is_cap"]:
                         tags.append(("Captain", "green"))
-                    elif row["is_vc"]:
+
+                    if row["is_vc"]:
                         tags.append(("Vice Captain", "yellow"))
-                    elif row["order"] > 11:
-                        tags.append(("Bench", "gray"))
 
                     if row["Status"] == "a":
                         tags.append(("Available", "green"))
@@ -849,7 +997,34 @@ with tab4:
                     render_list_card(
                         f"{row['Player']} · {row['Team']}",
                         tags,
-                        f'<span>GW Pts</span> {int(float(row["GW_Points"]))} · <span>Season</span> {int(float(row["Season_Points"]))} pts · <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
+                        f'<span>GW Pts</span> {int(float(row["GW_Points"]))}{mult_info} · <span>Season</span> {int(float(row["Season_Points"]))} pts · <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
+                    )
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("#### 🪑 Substitutes / Bench")
+                for _, row in bench.iterrows():
+                    sub_num = int(row["order"]) - 11
+                    sub_label = f"Sub {sub_num} ({row['Position']})"
+                    tags = [(sub_label, "gray")]
+
+                    if row["is_cap"]:
+                        tags.append(("Captain", "green"))
+                    if row["is_vc"]:
+                        tags.append(("Vice Captain", "yellow"))
+
+                    if row["Status"] == "a":
+                        tags.append(("Available", "green"))
+                    elif row["Status"] in ("i", "u"):
+                        tags.append(("Out", "red"))
+                    elif row["Status"] == "d":
+                        tags.append(("Doubtful", "yellow"))
+                    elif row["Status"] == "s":
+                        tags.append(("Suspended", "red"))
+
+                    render_list_card(
+                        f"{row['Player']} · {row['Team']}",
+                        tags,
+                        f'<span>GW Pts</span> {int(float(row["Raw_GW_Pts"]))} · <span>Season</span> {int(float(row["Season_Points"]))} pts · <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
                     )
 
             with col_news:
@@ -885,7 +1060,22 @@ with tab4:
 
 # ── TAB 5: Transfer Market ───────────────────────────────────────────────────
 with tab5:
-    section_header("Transfer Market Watch", "Track net transfers to anticipate price changes")
+    col_t5_hdr, col_t5_pop = st.columns([6, 1])
+    with col_t5_hdr:
+        section_header("Transfer Market Watch", "Track net transfers to anticipate price changes")
+    with col_t5_pop:
+        st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
+        with st.popover("📖 Guide"):
+            st.markdown(
+                """
+                **Transfer Velocity & Price Change Guide**
+                
+                * **Net Transfers:** Transfers in minus transfers out for the active gameweek.
+                * 📈 **Heating Up (Green):** Rapid inbound transfers. Crossing the threshold triggers a **+£0.1m price rise** at 01:30 GMT.
+                * 📉 **Cooling Down (Red):** Heavy selling momentum. Indicates an impending **-£0.1m price drop**.
+                * **Strategy:** Buy targets early in the gameweek before their price rises, and sell red-flagged assets before value is eroded.
+                """
+            )
 
     market_query = """
     SELECT
