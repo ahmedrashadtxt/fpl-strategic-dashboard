@@ -1,6 +1,7 @@
 from pathlib import Path
 import sqlite3
 import pandas as pd
+import plotly.express as px
 import requests
 import streamlit as st
 from streamlit.runtime.scriptrunner import get_script_run_ctx
@@ -21,7 +22,11 @@ if get_script_run_ctx() is None:
 
     sys.exit(subprocess.call([sys.executable, "-m", "streamlit", "run", __file__]))
 
-st.set_page_config(page_title="FPL Strategic Dashboard", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="FPL Strategic Dashboard",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 apply_theme()
 
@@ -86,21 +91,58 @@ summary_df = pd.read_sql(
     conn,
 )
 
-top_xgi_df = pd.read_sql(
+# Precalculate 5-GW upcoming fixture difficulty per team for rolling analysis
+fixtures_5gw = pd.read_sql(
     """
-    SELECT p.web_name, t.short_name, p.expected_goal_involvements AS xgi
-    FROM players p
-    INNER JOIN teams t ON p.team = t.id
-    WHERE p.minutes > 270
-    ORDER BY p.expected_goal_involvements DESC
-    LIMIT 8
+    SELECT event, team_h, team_a, team_h_difficulty, team_a_difficulty
+    FROM fixtures
+    WHERE event >= ? AND event < ? AND finished = 0
     """,
     conn,
+    params=[current_gw, current_gw + 5],
 )
+
+teams_fdr_map = {}
+for t_id in range(1, 21):
+    h_diff = fixtures_5gw[fixtures_5gw["team_h"] == t_id]["team_h_difficulty"].sum()
+    a_diff = fixtures_5gw[fixtures_5gw["team_a"] == t_id]["team_a_difficulty"].sum()
+    teams_fdr_map[t_id] = int(h_diff + a_diff) if (h_diff + a_diff) > 0 else 15
+
+
+@st.cache_data(ttl=300)
+def get_manager_squad_ids(mgr_id, target_gw):
+    """Fetches and caches the list of player element IDs in the user's squad."""
+    if not mgr_id:
+        return []
+    try:
+        gw = target_gw if target_gw >= 1 else 1
+        picks_url = f"https://fantasy.premierleague.com/api/entry/{mgr_id}/event/{gw}/picks/"
+        res = requests.get(picks_url, timeout=10)
+        if res.status_code != 200 and gw > 1:
+            gw -= 1
+            picks_url = f"https://fantasy.premierleague.com/api/entry/{mgr_id}/event/{gw}/picks/"
+            res = requests.get(picks_url, timeout=10)
+        if res.status_code == 200:
+            return [p["element"] for p in res.json().get("picks", [])]
+    except Exception:
+        return []
+    return []
+
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(f'<span class="gw-badge">NEXT · {gw_name}</span>', unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    manager_id = st.text_input(
+        "FPL Team ID",
+        value=st.session_state.get("manager_id", ""),
+        placeholder="e.g. 1234567",
+        key="global_manager_id",
+    )
+    if manager_id:
+        st.session_state["manager_id"] = manager_id
+
     st.markdown("<br>", unsafe_allow_html=True)
 
     render_sidebar_card(
@@ -122,7 +164,7 @@ with st.sidebar:
     )
 
     if st.button("Refresh Data", width="stretch", type="primary"):
-        with st.spinner("Fetching latest Premier League data..."):
+        with st.spinner("Fetching latest Premier League data and match histories..."):
             import fetch_data
 
             if hasattr(fetch_data, "main"):
@@ -153,16 +195,19 @@ with header_right:
         unsafe_allow_html=True,
     )
 
-tab1, tab2, tab3, tab4 = st.tabs(
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
     [
         "Expected Stats",
+        "Rolling Form",
         "Fixture Ticker",
         "Squad Analyzer",
         "Transfer Market",
     ]
 )
 
-# ── TAB 1 ────────────────────────────────────────────────────────────────────
+pos_map = {"GKP": 1, "DEF": 2, "MID": 3, "FWD": 4}
+
+# ── TAB 1: Expected Stats ────────────────────────────────────────────────────
 with tab1:
     section_header("Expected Stats & Underperformance", "Identify high-value and unlucky assets")
 
@@ -170,13 +215,13 @@ with tab1:
     with col_search:
         search_query = st.text_input(
             "🔍 Search Player / Club",
-            placeholder="e.g. Wirtz, Haaland, Arsenal, MCI...",
+            placeholder="e.g. Palmer, Haaland, Arsenal, MCI...",
             key="tab1_search",
         )
     with col1:
-        min_minutes = st.slider("Minimum Minutes Played", 0, 900, 0, step=45)
+        min_minutes = st.slider("Minimum Minutes Played", 0, 900, 0, step=45, key="tab1_min_mins")
     with col2:
-        position_filter = st.selectbox("Filter Position", ["All", "GKP", "DEF", "MID", "FWD"])
+        position_filter = st.selectbox("Filter Position", ["All", "GKP", "DEF", "MID", "FWD"], key="tab1_pos")
     with col3:
         sort_by = st.selectbox(
             "Rank By",
@@ -188,15 +233,20 @@ with tab1:
                 "Clean Sheets",
                 "Goalkeeper Saves",
             ],
+            key="tab1_sort",
         )
 
-    pos_map = {"GKP": 1, "DEF": 2, "MID": 3, "FWD": 4}
+    only_my_squad_tab1 = st.checkbox("🎯 Only My Squad Players", key="tab1_only_squad")
+
     pos_clause = f"AND p.element_type = {pos_map[position_filter]}" if position_filter != "All" else ""
 
     query = f"""
     SELECT
+        p.id AS element_id,
         p.web_name AS Player,
+        p.first_name || ' ' || p.second_name AS Full_Name,
         t.short_name AS Team,
+        t.name AS Club_Name,
         CASE p.element_type
             WHEN 1 THEN 'GKP'
             WHEN 2 THEN 'DEF'
@@ -236,10 +286,23 @@ with tab1:
     ):
         df_xgi[col_name] = pd.to_numeric(df_xgi[col_name], errors="coerce")
 
+    # Filter by Manager Squad if checkbox is selected
+    active_manager_id_tab1 = st.session_state.get("manager_id", "").strip()
+    if only_my_squad_tab1:
+        if not active_manager_id_tab1:
+            st.info("💡 Enter your FPL Team ID in the sidebar or Tab 4 to filter by your squad.")
+            squad_ids_tab1 = []
+        else:
+            squad_ids_tab1 = get_manager_squad_ids(active_manager_id_tab1, current_gw)
+        df_xgi = df_xgi[df_xgi["element_id"].isin(squad_ids_tab1)]
+
     if search_query.strip():
+        q1 = search_query.strip()
         df_xgi = df_xgi[
-            df_xgi["Player"].str.contains(search_query, case=False, na=False)
-            | df_xgi["Team"].str.contains(search_query, case=False, na=False)
+            df_xgi["Player"].str.contains(q1, case=False, na=False)
+            | df_xgi["Full_Name"].str.contains(q1, case=False, na=False)
+            | df_xgi["Team"].str.contains(q1, case=False, na=False)
+            | df_xgi["Club_Name"].str.contains(q1, case=False, na=False)
         ]
 
     sort_map = {
@@ -254,7 +317,7 @@ with tab1:
     df_xgi = df_xgi.sort_values(by=col, ascending=asc)
 
     if df_xgi.empty:
-        st.info(f"No players found matching '{search_query}'. Try adjusting your search term or filters.")
+        st.info(f"No players found matching '{search_query}'. Try adjusting your filters.")
     else:
         top_cards = df_xgi.head(min(5, len(df_xgi)))
         card_cols = st.columns(len(top_cards))
@@ -286,8 +349,26 @@ with tab1:
                 pass
             return ""
 
+        display_cols_tab1 = [
+            "Player",
+            "Team",
+            "Pos",
+            "Price",
+            "Minutes",
+            "Total_Points",
+            "Goals",
+            "Assists",
+            "Clean_Sheets",
+            "Saves",
+            "xG",
+            "xA",
+            "xGI",
+            "xG_Delta",
+            "xGI_per_90",
+        ]
+
         st.dataframe(
-            df_xgi.head(25).style.map(highlight_xg_delta, subset=["xG_Delta"]),
+            df_xgi[display_cols_tab1].head(25).style.map(highlight_xg_delta, subset=["xG_Delta"]),
             hide_index=True,
             width="stretch",
             column_config={
@@ -306,8 +387,292 @@ with tab1:
             },
         )
 
-# ── TAB 2 ────────────────────────────────────────────────────────────────────
+# ── TAB 2: Rolling Form & Scatter Plot ────────────────────────────────────────
 with tab2:
+    section_header("Rolling Form & Trends", "Analyze form trajectory vs upcoming fixture schedule")
+
+    table_exists = pd.read_sql(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='player_match_history'",
+        conn,
+    )
+
+    if table_exists.empty:
+        st.warning(
+            "⚠️ Match history table `player_match_history` was not found in `fpl.db`. "
+            "Please click **Refresh Data** in the sidebar to populate match histories."
+        )
+    else:
+        col_search2, col_w, col_pos2, col_min_matches, col_min_mins2, col_sort2 = st.columns(
+            [1.4, 0.9, 0.8, 0.9, 0.9, 1.2]
+        )
+        with col_search2:
+            search_query2 = st.text_input(
+                "🔍 Search Player / Club",
+                placeholder="e.g. Cherki, Saka, Chelsea, ARS...",
+                key="tab2_search",
+            )
+        with col_w:
+            window_size = st.slider("Match Window", min_value=3, max_value=10, value=5, step=1, key="tab2_window")
+        with col_pos2:
+            pos_filter2 = st.selectbox("Position", ["All", "GKP", "DEF", "MID", "FWD"], key="tab2_pos")
+        with col_min_matches:
+            min_matches = st.slider(
+                "Min Matches", min_value=1, max_value=window_size, value=min(3, window_size), step=1, key="tab2_matches"
+            )
+        with col_min_mins2:
+            min_avg_mins = st.slider("Min Avg Mins", 0, 90, 45, step=15, key="tab2_mins")
+        with col_sort2:
+            rolling_sort = st.selectbox(
+                "Rank By",
+                [
+                    "Rolling Sum xGI",
+                    "Rolling xGI / 90",
+                    "Rolling Avg Points",
+                    "Upcoming Fixture Ease",
+                    "Rolling Avg Minutes",
+                    "Price",
+                ],
+                key="tab2_sort",
+            )
+
+        only_my_squad = st.checkbox("🎯 Only My Squad Players", key="tab2_only_squad")
+
+        pos_clause2 = f"AND p.element_type = {pos_map[pos_filter2]}" if pos_filter2 != "All" else ""
+
+        rolling_query = f"""
+        WITH ranked_matches AS (
+            SELECT
+                h.element_id,
+                p.web_name AS Player,
+                p.first_name || ' ' || p.second_name AS Full_Name,
+                t.short_name AS Team,
+                t.name AS Club_Name,
+                p.team AS Team_ID,
+                CASE p.element_type
+                    WHEN 1 THEN 'GKP'
+                    WHEN 2 THEN 'DEF'
+                    WHEN 3 THEN 'MID'
+                    WHEN 4 THEN 'FWD'
+                END AS Pos,
+                p.now_cost / 10.0 AS Price,
+                h.round AS GW,
+                h.total_points,
+                h.minutes,
+                CAST(h.expected_goal_involvements AS FLOAT) AS xgi,
+                AVG(h.total_points) OVER (
+                    PARTITION BY h.element_id
+                    ORDER BY h.round
+                    ROWS BETWEEN {window_size - 1} PRECEDING AND CURRENT ROW
+                ) AS Rolling_Avg_Pts,
+                SUM(CAST(h.expected_goal_involvements AS FLOAT)) OVER (
+                    PARTITION BY h.element_id
+                    ORDER BY h.round
+                    ROWS BETWEEN {window_size - 1} PRECEDING AND CURRENT ROW
+                ) AS Rolling_Sum_xGI,
+                AVG(h.minutes) OVER (
+                    PARTITION BY h.element_id
+                    ORDER BY h.round
+                    ROWS BETWEEN {window_size - 1} PRECEDING AND CURRENT ROW
+                ) AS Rolling_Avg_Mins,
+                SUM(h.minutes) OVER (
+                    PARTITION BY h.element_id
+                    ORDER BY h.round
+                    ROWS BETWEEN {window_size - 1} PRECEDING AND CURRENT ROW
+                ) AS Rolling_Total_Mins,
+                SUM(CASE WHEN h.minutes > 0 THEN 1 ELSE 0 END) OVER (
+                    PARTITION BY h.element_id
+                    ORDER BY h.round
+                    ROWS BETWEEN {window_size - 1} PRECEDING AND CURRENT ROW
+                ) AS Rolling_Matches_Played,
+                ROW_NUMBER() OVER (
+                    PARTITION BY h.element_id
+                    ORDER BY h.round DESC
+                ) AS rn
+            FROM player_match_history h
+            INNER JOIN players p ON h.element_id = p.id
+            INNER JOIN teams t ON p.team = t.id
+            WHERE 1=1 {pos_clause2}
+        )
+        SELECT
+            element_id,
+            Player,
+            Full_Name,
+            Team,
+            Club_Name,
+            Team_ID,
+            Pos,
+            Price,
+            GW AS Latest_GW,
+            ROUND(Rolling_Avg_Pts, 2) AS Rolling_Avg_Pts,
+            ROUND(Rolling_Sum_xGI, 2) AS Rolling_Sum_xGI,
+            ROUND(Rolling_Avg_Mins, 1) AS Rolling_Avg_Mins,
+            Rolling_Matches_Played,
+            ROUND(
+                CASE 
+                    WHEN Rolling_Total_Mins > 0 
+                    THEN (Rolling_Sum_xGI / Rolling_Total_Mins) * 90.0 
+                    ELSE 0.0 
+                END, 2
+            ) AS Rolling_xGI_per_90
+        FROM ranked_matches
+        WHERE rn = 1 
+          AND Rolling_Avg_Mins >= {min_avg_mins}
+          AND Rolling_Matches_Played >= {min_matches}
+        """
+        df_rolling = pd.read_sql(rolling_query, conn)
+
+        if not df_rolling.empty:
+            df_rolling["Upcoming_FDR"] = df_rolling["Team_ID"].map(teams_fdr_map).fillna(15).astype(int)
+
+            # Filter by Manager Squad if selected
+            active_manager_id = st.session_state.get("manager_id", "").strip()
+            if only_my_squad:
+                if not active_manager_id:
+                    st.info("💡 Enter your FPL Team ID in the sidebar or Tab 4 to filter by your squad.")
+                    squad_ids = []
+                else:
+                    squad_ids = get_manager_squad_ids(active_manager_id, current_gw)
+                df_rolling = df_rolling[df_rolling["element_id"].isin(squad_ids)]
+
+            if search_query2.strip():
+                q2 = search_query2.strip()
+                df_rolling = df_rolling[
+                    df_rolling["Player"].str.contains(q2, case=False, na=False)
+                    | df_rolling["Full_Name"].str.contains(q2, case=False, na=False)
+                    | df_rolling["Team"].str.contains(q2, case=False, na=False)
+                    | df_rolling["Club_Name"].str.contains(q2, case=False, na=False)
+                ]
+
+            sort_rolling_map = {
+                "Rolling Sum xGI": ("Rolling_Sum_xGI", False),
+                "Rolling xGI / 90": ("Rolling_xGI_per_90", False),
+                "Rolling Avg Points": ("Rolling_Avg_Pts", False),
+                "Upcoming Fixture Ease": ("Upcoming_FDR", True),
+                "Rolling Avg Minutes": ("Rolling_Avg_Mins", False),
+                "Price": ("Price", False),
+            }
+            r_col, r_asc = sort_rolling_map[rolling_sort]
+            df_rolling = df_rolling.sort_values(by=r_col, ascending=r_asc)
+
+        if df_rolling.empty:
+            st.info("No players found matching the current rolling filter criteria.")
+        else:
+            # Quadrant Scatter Plot
+            if len(df_rolling) >= 2:
+                x_mid = float(df_rolling["Upcoming_FDR"].median())
+                y_mid = float(df_rolling["Rolling_Sum_xGI"].median())
+
+                fig = px.scatter(
+                    df_rolling,
+                    x="Upcoming_FDR",
+                    y="Rolling_Sum_xGI",
+                    color="Pos",
+                    size="Price",
+                    hover_name="Player",
+                    hover_data={
+                        "Team": True,
+                        "Price": ":.1f",
+                        "Rolling_Sum_xGI": ":.2f",
+                        "Rolling_xGI_per_90": ":.2f",
+                        "Rolling_Avg_Pts": ":.2f",
+                        "Upcoming_FDR": True,
+                        "Rolling_Avg_Mins": ":.0f",
+                        "Rolling_Matches_Played": True,
+                        "Pos": False,
+                    },
+                    labels={
+                        "Upcoming_FDR": "Upcoming 5-GW Fixture Difficulty Rating (Lower = Easier)",
+                        "Rolling_Sum_xGI": f"Rolling {window_size}-Match xGI",
+                        "Pos": "Position",
+                    },
+                    title=f"Underlying Form vs Schedule (L{window_size} xGI vs Next 5 FDR)",
+                    color_discrete_map={
+                        "GKP": "#f59e0b",
+                        "DEF": "#3b82f6",
+                        "MID": "#10b981",
+                        "FWD": "#ef4444",
+                    },
+                )
+
+                fig.add_vline(x=x_mid, line_dash="dash", line_color="rgba(255, 255, 255, 0.25)")
+                fig.add_hline(y=y_mid, line_dash="dash", line_color="rgba(255, 255, 255, 0.25)")
+
+                fig.add_annotation(
+                    x=float(df_rolling["Upcoming_FDR"].min()),
+                    y=float(df_rolling["Rolling_Sum_xGI"].max()),
+                    text="🔥 Prime Buys (High Form + Easy Run)",
+                    showarrow=False,
+                    xanchor="left",
+                    yanchor="top",
+                    font=dict(size=11, color="#22c55e"),
+                )
+                fig.add_annotation(
+                    x=float(df_rolling["Upcoming_FDR"].max()),
+                    y=float(df_rolling["Rolling_Sum_xGI"].max()),
+                    text="⚠️ High Form vs Tough Run",
+                    showarrow=False,
+                    xanchor="right",
+                    yanchor="top",
+                    font=dict(size=11, color="#eab308"),
+                )
+
+                fig.update_layout(
+                    template="plotly_dark",
+                    plot_bgcolor="rgba(15, 23, 42, 0.4)",
+                    paper_bgcolor="rgba(15, 23, 42, 0.0)",
+                    margin=dict(l=20, r=20, t=50, b=20),
+                    height=450,
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+            # Top Cards
+            top_rolling = df_rolling.head(min(5, len(df_rolling)))
+            cols_r = st.columns(len(top_rolling))
+            for i, (_, row) in enumerate(top_rolling.iterrows()):
+                with cols_r[i]:
+                    render_list_card(
+                        f"{row['Player']} ({row['Team']})",
+                        [(row["Pos"], "blue"), (f"L{window_size} Form", "green")],
+                        f'<span>Price</span> £{fmt_num(row["Price"], ".1f")} · <span>xGI</span> {fmt_num(row["Rolling_Sum_xGI"])} · <span>xGI/90</span> {fmt_num(row["Rolling_xGI_per_90"])} · <span>Next 5 FDR</span> {int(row["Upcoming_FDR"])} · <span>Avg Pts</span> {fmt_num(row["Rolling_Avg_Pts"], ".1f")}',
+                    )
+
+            display_cols_tab2 = [
+                "Player",
+                "Team",
+                "Pos",
+                "Price",
+                "Latest_GW",
+                "Rolling_Sum_xGI",
+                "Rolling_xGI_per_90",
+                "Rolling_Avg_Pts",
+                "Upcoming_FDR",
+                "Rolling_Avg_Mins",
+                "Rolling_Matches_Played",
+            ]
+
+            # Table
+            st.dataframe(
+                df_rolling[display_cols_tab2].head(35),
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    "Player": st.column_config.TextColumn("Player"),
+                    "Team": st.column_config.TextColumn("Club"),
+                    "Pos": st.column_config.TextColumn("Pos"),
+                    "Price": st.column_config.NumberColumn("Price", format="£%.1f"),
+                    "Latest_GW": st.column_config.NumberColumn("GW"),
+                    "Rolling_Sum_xGI": st.column_config.NumberColumn(f"Sum xGI (L{window_size})", format="%.2f"),
+                    "Rolling_xGI_per_90": st.column_config.NumberColumn(f"xGI/90 (L{window_size})", format="%.2f"),
+                    "Rolling_Avg_Pts": st.column_config.NumberColumn(f"Avg Pts (L{window_size})", format="%.2f"),
+                    "Upcoming_FDR": st.column_config.NumberColumn("Next 5 FDR (Ease)", format="%d"),
+                    "Rolling_Avg_Mins": st.column_config.NumberColumn(f"Avg Mins (L{window_size})", format="%.1f"),
+                    "Rolling_Matches_Played": st.column_config.NumberColumn("Apps", format="%d"),
+                },
+            )
+
+# ── TAB 3: Fixture Ticker ────────────────────────────────────────────────────
+with tab3:
     section_header(f"Fixture Difficulty · GW{current_gw}–{current_gw + 4}", "Upcoming schedule ranked by difficulty")
 
     fixtures_query = """
@@ -367,24 +732,33 @@ with tab2:
 
     st.dataframe(ticker_df, width="stretch")
 
-# ── TAB 3 ────────────────────────────────────────────────────────────────────
-with tab3:
+# ── TAB 4: Squad Analyzer ────────────────────────────────────────────────────
+with tab4:
     section_header("Manager Squad Analyzer", "Import your FPL team ID to analyze your squad")
 
-    manager_id = st.text_input("FPL Team / Entry ID", placeholder="e.g. 1234567")
+    tab4_manager_id = st.text_input(
+        "FPL Team / Entry ID",
+        value=st.session_state.get("manager_id", ""),
+        placeholder="e.g. 1234567",
+        key="tab4_manager_id",
+    )
+    if tab4_manager_id:
+        st.session_state["manager_id"] = tab4_manager_id
 
-    if manager_id:
+    mgr_to_use = tab4_manager_id or st.session_state.get("manager_id", "")
+
+    if mgr_to_use:
         try:
-            mgr_url = f"https://fantasy.premierleague.com/api/entry/{manager_id}/"
+            mgr_url = f"https://fantasy.premierleague.com/api/entry/{mgr_to_use}/"
             mgr_data = requests.get(mgr_url).json()
 
             target_gw = current_gw if current_gw >= 1 else 1
-            picks_url = f"https://fantasy.premierleague.com/api/entry/{manager_id}/event/{target_gw}/picks/"
+            picks_url = f"https://fantasy.premierleague.com/api/entry/{mgr_to_use}/event/{target_gw}/picks/"
             picks_res = requests.get(picks_url)
 
             if picks_res.status_code != 200 and target_gw > 1:
                 target_gw -= 1
-                picks_url = f"https://fantasy.premierleague.com/api/entry/{manager_id}/event/{target_gw}/picks/"
+                picks_url = f"https://fantasy.premierleague.com/api/entry/{mgr_to_use}/event/{target_gw}/picks/"
                 picks_res = requests.get(picks_url)
 
             picks_data = picks_res.json()
@@ -509,8 +883,8 @@ with tab3:
         except Exception as e:
             st.error(f"Could not load team. Verify your FPL ID. (Error: {e})")
 
-# ── TAB 4 ────────────────────────────────────────────────────────────────────
-with tab4:
+# ── TAB 5: Transfer Market ───────────────────────────────────────────────────
+with tab5:
     section_header("Transfer Market Watch", "Track net transfers to anticipate price changes")
 
     market_query = """

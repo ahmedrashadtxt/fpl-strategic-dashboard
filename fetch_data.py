@@ -1,77 +1,177 @@
-import requests
 import sqlite3
-import pandas as pd
 import sys
 import time
+import pandas as pd
+import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
-def fetch_data():
-    """
-    Fetches master data and fixtures from the official Premier League/FPL API
-    and saves them into the SQLite database.
-    """
-    # Configure retry strategy
+
+def get_session_and_headers():
     session = requests.Session()
     retries = Retry(
         total=5,
         backoff_factor=1.5,
         status_forcelist=[429, 500, 502, 503, 504],
-        raise_on_status=False
+        raise_on_status=False,
     )
-    session.mount('https://', HTTPAdapter(max_retries=retries))
+    session.mount("https://", HTTPAdapter(max_retries=retries))
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            " (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        ),
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": "https://fantasy.premierleague.com/",
-        "Origin": "https://fantasy.premierleague.com"
+        "Origin": "https://fantasy.premierleague.com",
     }
+    return session, headers
 
-    # Helper function to get JSON with logging and validation
+
+def create_history_table(conn):
+    """Creates the match-by-match history table if it does not exist."""
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS player_match_history (
+        element_id INTEGER,
+        round INTEGER,
+        fixture_id INTEGER,
+        opponent_team INTEGER,
+        was_home INTEGER,
+        total_points INTEGER,
+        minutes INTEGER,
+        goals_scored INTEGER,
+        assists INTEGER,
+        clean_sheets INTEGER,
+        goals_conceded INTEGER,
+        expected_goals TEXT,
+        expected_assists TEXT,
+        expected_goal_involvements TEXT,
+        expected_goals_conceded TEXT,
+        influence TEXT,
+        creativity TEXT,
+        threat TEXT,
+        ict_index TEXT,
+        bps INTEGER,
+        bonus INTEGER,
+        value INTEGER,
+        transfers_in INTEGER,
+        transfers_out INTEGER,
+        PRIMARY KEY (element_id, round)
+    );
+    """)
+    conn.commit()
+
+
+def fetch_all_player_histories(player_ids, conn, session, headers):
+    """Fetches element-summary histories for all player IDs and upserts into SQLite."""
+    all_history_records = []
+    total_players = len(player_ids)
+    print(f"Fetching match histories for {total_players} players...")
+
+    for idx, pid in enumerate(player_ids, start=1):
+        url = f"https://fantasy.premierleague.com/api/element-summary/{pid}/"
+        try:
+            res = session.get(url, headers=headers, timeout=15)
+            if res.status_code == 200:
+                data = res.json()
+                history_list = data.get("history", [])
+                for match in history_list:
+                    all_history_records.append((
+                        match.get("element"),
+                        match.get("round"),
+                        match.get("fixture"),
+                        match.get("opponent_team"),
+                        1 if match.get("was_home") else 0,
+                        match.get("total_points", 0),
+                        match.get("minutes", 0),
+                        match.get("goals_scored", 0),
+                        match.get("assists", 0),
+                        match.get("clean_sheets", 0),
+                        match.get("goals_conceded", 0),
+                        str(match.get("expected_goals", "0.0")),
+                        str(match.get("expected_assists", "0.0")),
+                        str(match.get("expected_goal_involvements", "0.0")),
+                        str(match.get("expected_goals_conceded", "0.0")),
+                        str(match.get("influence", "0.0")),
+                        str(match.get("creativity", "0.0")),
+                        str(match.get("threat", "0.0")),
+                        str(match.get("ict_index", "0.0")),
+                        match.get("bps", 0),
+                        match.get("bonus", 0),
+                        match.get("value", 0),
+                        match.get("transfers_in", 0),
+                        match.get("transfers_out", 0),
+                    ))
+            elif res.status_code == 404:
+                print(f"Player {pid} not found (404), skipping.")
+            else:
+                print(
+                    f"Warning: Player {pid} returned status code {res.status_code}",
+                    file=sys.stderr,
+                )
+
+            # Small delay to respect rate limits
+            time.sleep(0.05)
+
+        except Exception as e:
+            print(f"Error fetching history for player {pid}: {e}", file=sys.stderr)
+
+        if idx % 100 == 0 or idx == total_players:
+            print(f"Progress: {idx}/{total_players} players processed.")
+
+    if all_history_records:
+        cursor = conn.cursor()
+        cursor.executemany(
+            """
+            INSERT OR REPLACE INTO player_match_history (
+                element_id, round, fixture_id, opponent_team, was_home,
+                total_points, minutes, goals_scored, assists, clean_sheets,
+                goals_conceded, expected_goals, expected_assists,
+                expected_goal_involvements, expected_goals_conceded,
+                influence, creativity, threat, ict_index, bps, bonus,
+                value, transfers_in, transfers_out
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            all_history_records,
+        )
+        conn.commit()
+        print(f"Successfully upserted {len(all_history_records)} match records into player_match_history.")
+
+
+def fetch_data(db_path="fpl.db"):
+    """Fetches master data, fixtures, and match histories into SQLite."""
+    session, headers = get_session_and_headers()
+
     def get_json(url):
         print(f"Fetching from: {url}")
         try:
             response = session.get(url, headers=headers, timeout=20)
-            print(f"Response status: {response.status_code}")
-            
             if response.status_code != 200:
-                print(f"Error: Received status code {response.status_code}", file=sys.stderr)
-                print(f"Response Headers: {response.headers}", file=sys.stderr)
-                print(f"Response Preview: {response.text[:1000]}", file=sys.stderr)
+                print(f"Error: Status code {response.status_code} for {url}", file=sys.stderr)
                 response.raise_for_status()
-                
             return response.json()
-        except requests.exceptions.HTTPError as http_err:
-            print(f"HTTP error occurred for {url}: {http_err}", file=sys.stderr)
-            raise
-        except requests.exceptions.JSONDecodeError as json_err:
-            print(f"JSON decode error for {url}: {json_err}", file=sys.stderr)
-            if 'response' in locals() and response is not None:
-                print(f"Response Content (first 1000 chars):\n{response.text[:1000]}", file=sys.stderr)
-            raise
         except Exception as err:
-            print(f"An unexpected error occurred for {url}: {err}", file=sys.stderr)
+            print(f"Fetch failed for {url}: {err}", file=sys.stderr)
             raise
 
-    # 1. Fetch Master Data (Players, Teams, Gameweeks)
+    # 1. Fetch Master Data
     bootstrap_url = "https://fantasy.premierleague.com/api/bootstrap-static/"
     bootstrap_res = get_json(bootstrap_url)
+    print("Master data retrieved. Processing tables...")
 
-    print("Master data successfully retrieved. Processing dataframes...")
-    players_df = pd.DataFrame(bootstrap_res['elements'])
-    teams_df = pd.DataFrame(bootstrap_res['teams'])
-    positions_df = pd.DataFrame(bootstrap_res['element_types'])
-    events_df = pd.DataFrame(bootstrap_res['events'])
+    players_df = pd.DataFrame(bootstrap_res["elements"])
+    teams_df = pd.DataFrame(bootstrap_res["teams"])
+    positions_df = pd.DataFrame(bootstrap_res["element_types"])
+    events_df = pd.DataFrame(bootstrap_res["events"])
 
-    # 2. Fetch Full Season Fixtures
+    # 2. Fetch Fixtures
     fixtures_url = "https://fantasy.premierleague.com/api/fixtures/"
     fixtures_res = get_json(fixtures_url)
-    print("Fixtures data successfully retrieved. Processing dataframe...")
     fixtures_df = pd.DataFrame(fixtures_res)
 
-    # 3. Clean and sanitize object types for SQLite
     def clean_lists(df):
         return df.map(lambda x: str(x) if isinstance(x, (list, dict)) else x)
 
@@ -81,26 +181,89 @@ def fetch_data():
     events_df = clean_lists(events_df)
     fixtures_df = clean_lists(fixtures_df)
 
-    # 4. Save into SQLite
-    print("Writing data to fpl.db...")
-    conn = sqlite3.connect('fpl.db')
+    # 3. Save Master Tables to SQLite
+    print(f"Writing master data to {db_path}...")
+    conn = sqlite3.connect(db_path)
     try:
-        players_df.to_sql('players', conn, if_exists='replace', index=False)
-        teams_df.to_sql('teams', conn, if_exists='replace', index=False)
-        positions_df.to_sql('positions', conn, if_exists='replace', index=False)
-        events_df.to_sql('events', conn, if_exists='replace', index=False)
-        fixtures_df.to_sql('fixtures', conn, if_exists='replace', index=False)
-        print("Database successfully synced with players, fixtures, and events!")
+        players_df.to_sql("players", conn, if_exists="replace", index=False)
+        teams_df.to_sql("teams", conn, if_exists="replace", index=False)
+        positions_df.to_sql("positions", conn, if_exists="replace", index=False)
+        events_df.to_sql("events", conn, if_exists="replace", index=False)
+        fixtures_df.to_sql("fixtures", conn, if_exists="replace", index=False)
+
+        # 4. Create History Table and Fetch Player Match Histories
+        create_history_table(conn)
+        player_ids = players_df["id"].tolist()
+        fetch_all_player_histories(player_ids, conn, session, headers)
+
+        print("Database sync completed successfully!")
     finally:
         conn.close()
 
+
+def get_rolling_match_stats(db_path="fpl.db", window=5):
+    """Computes rolling N-gameweek metrics per player using SQL window functions."""
+    query = f"""
+    WITH ranked_matches AS (
+        SELECT
+            h.element_id,
+            p.web_name AS player_name,
+            t.short_name AS team_name,
+            pos.singular_name_short AS position,
+            p.now_cost / 10.0 AS price,
+            h.round AS gameweek,
+            h.total_points,
+            h.minutes,
+            CAST(h.expected_goal_involvements AS FLOAT) AS xgi,
+            AVG(h.total_points) OVER (
+                PARTITION BY h.element_id
+                ORDER BY h.round
+                ROWS BETWEEN {window - 1} PRECEDING AND CURRENT ROW
+            ) AS rolling_avg_points,
+            SUM(CAST(h.expected_goal_involvements AS FLOAT)) OVER (
+                PARTITION BY h.element_id
+                ORDER BY h.round
+                ROWS BETWEEN {window - 1} PRECEDING AND CURRENT ROW
+            ) AS rolling_sum_xgi,
+            AVG(h.minutes) OVER (
+                PARTITION BY h.element_id
+                ORDER BY h.round
+                ROWS BETWEEN {window - 1} PRECEDING AND CURRENT ROW
+            ) AS rolling_avg_minutes,
+            ROW_NUMBER() OVER (
+                PARTITION BY h.element_id
+                ORDER BY h.round DESC
+            ) AS rn
+        FROM player_match_history h
+        INNER JOIN players p ON h.element_id = p.id
+        INNER JOIN teams t ON p.team = t.id
+        INNER JOIN positions pos ON p.element_type = pos.id
+    )
+    SELECT
+        element_id,
+        player_name,
+        team_name,
+        position,
+        price,
+        gameweek AS latest_gw,
+        ROUND(rolling_avg_points, 2) AS rolling_avg_pts,
+        ROUND(rolling_sum_xgi, 2) AS rolling_sum_xgi,
+        ROUND(rolling_avg_minutes, 1) AS rolling_avg_mins
+    FROM ranked_matches
+    WHERE rn = 1
+    ORDER BY rolling_sum_xgi DESC;
+    """
+    with sqlite3.connect(db_path) as conn:
+        return pd.read_sql(query, conn)
+
+
 def fetch_all_data():
-    """Compatibility wrapper for fetch_data()"""
     fetch_data()
 
+
 def main():
-    """Compatibility wrapper for fetch_data()"""
     fetch_data()
+
 
 if __name__ == "__main__":
     fetch_data()
