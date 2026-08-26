@@ -1,7 +1,17 @@
-# Databases
-*.db
+# Streamlit secrets (private credentials)
+.streamlit/secrets.toml
+
+# Python cache & virtual environment
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Local databases (if dynamically fetched)
 fpl.db
 
-# Python Cache
-__pycache__/
-*.pyc
+# OS-specific files
+.DS_Store
+Thumbs.db
