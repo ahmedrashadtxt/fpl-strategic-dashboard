@@ -1,12 +1,10 @@
-name: Update FPL Database
+name: Scheduled FPL Data Sync
 
 on:
   schedule:
-    # Runs daily at 02:00 UTC (shortly after FPL price changes execute)
+    # Runs at 02:00 UTC every day (after FPL price changes at 01:30 GMT)
     - cron: '0 2 * * *'
-    # Runs every 6 hours to capture transfer market trends
-    - cron: '0 */6 * * *'
-  workflow_dispatch: # Allows manual trigger from GitHub UI
+  workflow_dispatch: # Allows manual trigger from GitHub Actions UI
 
 jobs:
   update-db:
@@ -15,18 +13,21 @@ jobs:
       contents: write
 
     steps:
-      - name: Check out repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Execute data fetch script
+      - name: Run full data ingestion pipeline
         run: python fetch_data.py
 
       - name: Commit and push updated database
@@ -34,4 +35,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add fpl.db
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update FPL database [skip ci]" && git push)
+          git commit -m "Automated FPL match data sync [skip ci]" || exit 0
+          git push

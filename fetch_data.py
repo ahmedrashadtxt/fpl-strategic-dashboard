@@ -65,11 +65,39 @@ def create_history_table(conn):
     conn.commit()
 
 
+def create_past_seasons_table(conn):
+    """Creates the multi-season summary table for historical baselines."""
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS player_past_seasons (
+        element_id INTEGER,
+        season_name TEXT,
+        start_cost INTEGER,
+        end_cost INTEGER,
+        total_points INTEGER,
+        minutes INTEGER,
+        goals_scored INTEGER,
+        assists INTEGER,
+        clean_sheets INTEGER,
+        goals_conceded INTEGER,
+        bonus INTEGER,
+        bps INTEGER,
+        influence TEXT,
+        creativity TEXT,
+        threat TEXT,
+        ict_index TEXT,
+        PRIMARY KEY (element_id, season_name)
+    );
+    """)
+    conn.commit()
+
+
 def fetch_all_player_histories(player_ids, conn, session, headers):
-    """Fetches element-summary histories for all player IDs and upserts into SQLite."""
+    """Fetches element-summary histories and multi-season aggregates for all player IDs."""
     all_history_records = []
+    all_past_season_records = []
     total_players = len(player_ids)
-    print(f"Fetching match histories for {total_players} players...")
+    print(f"Fetching match histories and past seasons for {total_players} players...")
 
     for idx, pid in enumerate(player_ids, start=1):
         url = f"https://fantasy.premierleague.com/api/element-summary/{pid}/"
@@ -77,6 +105,8 @@ def fetch_all_player_histories(player_ids, conn, session, headers):
             res = session.get(url, headers=headers, timeout=15)
             if res.status_code == 200:
                 data = res.json()
+                
+                # 1. Current Season Match-by-Match Logs
                 history_list = data.get("history", [])
                 for match in history_list:
                     all_history_records.append((
@@ -105,6 +135,28 @@ def fetch_all_player_histories(player_ids, conn, session, headers):
                         match.get("transfers_in", 0),
                         match.get("transfers_out", 0),
                     ))
+
+                # 2. Previous Seasons Aggregated Totals
+                past_seasons_list = data.get("history_past", [])
+                for past in past_seasons_list:
+                    all_past_season_records.append((
+                        pid,
+                        past.get("season_name"),
+                        past.get("start_cost", 0),
+                        past.get("end_cost", 0),
+                        past.get("total_points", 0),
+                        past.get("minutes", 0),
+                        past.get("goals_scored", 0),
+                        past.get("assists", 0),
+                        past.get("clean_sheets", 0),
+                        past.get("goals_conceded", 0),
+                        past.get("bonus", 0),
+                        past.get("bps", 0),
+                        str(past.get("influence", "0.0")),
+                        str(past.get("creativity", "0.0")),
+                        str(past.get("threat", "0.0")),
+                        str(past.get("ict_index", "0.0")),
+                    ))
             elif res.status_code == 404:
                 print(f"Player {pid} not found (404), skipping.")
             else:
@@ -113,7 +165,6 @@ def fetch_all_player_histories(player_ids, conn, session, headers):
                     file=sys.stderr,
                 )
 
-            # Small delay to respect rate limits
             time.sleep(0.05)
 
         except Exception as e:
@@ -122,8 +173,8 @@ def fetch_all_player_histories(player_ids, conn, session, headers):
         if idx % 100 == 0 or idx == total_players:
             print(f"Progress: {idx}/{total_players} players processed.")
 
+    cursor = conn.cursor()
     if all_history_records:
-        cursor = conn.cursor()
         cursor.executemany(
             """
             INSERT OR REPLACE INTO player_match_history (
@@ -137,12 +188,53 @@ def fetch_all_player_histories(player_ids, conn, session, headers):
             """,
             all_history_records,
         )
-        conn.commit()
         print(f"Successfully upserted {len(all_history_records)} match records into player_match_history.")
+
+    if all_past_season_records:
+        cursor.executemany(
+            """
+            INSERT OR REPLACE INTO player_past_seasons (
+                element_id, season_name, start_cost, end_cost, total_points,
+                minutes, goals_scored, assists, clean_sheets, goals_conceded,
+                bonus, bps, influence, creativity, threat, ict_index
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            all_past_season_records,
+        )
+        print(f"Successfully upserted {len(all_past_season_records)} multi-season records into player_past_seasons.")
+
+    conn.commit()
+
+
+def fetch_transfer_market_data(db_path="fpl.db"):
+    """Lightweight sync: Updates only players and events master data without fetching player histories."""
+    session, headers = get_session_and_headers()
+    bootstrap_url = "https://fantasy.premierleague.com/api/bootstrap-static/"
+    try:
+        response = session.get(bootstrap_url, headers=headers, timeout=20)
+        if response.status_code == 200:
+            bootstrap_res = response.json()
+            players_df = pd.DataFrame(bootstrap_res["elements"])
+            events_df = pd.DataFrame(bootstrap_res["events"])
+
+            def clean_lists(df):
+                return df.map(lambda x: str(x) if isinstance(x, (list, dict)) else x)
+
+            players_df = clean_lists(players_df)
+            events_df = clean_lists(events_df)
+
+            with sqlite3.connect(db_path) as conn:
+                players_df.to_sql("players", conn, if_exists="replace", index=False)
+                events_df.to_sql("events", conn, if_exists="replace", index=False)
+            print("Transfer market data updated successfully.")
+        else:
+            print(f"Failed to fetch market data, status code: {response.status_code}")
+    except Exception as e:
+        print(f"Error fetching transfer market data: {e}", file=sys.stderr)
 
 
 def fetch_data(db_path="fpl.db"):
-    """Fetches master data, fixtures, and match histories into SQLite."""
+    """Full sync: Fetches master data, fixtures, match histories, and multi-season records into SQLite."""
     session, headers = get_session_and_headers()
 
     def get_json(url):
@@ -191,8 +283,9 @@ def fetch_data(db_path="fpl.db"):
         events_df.to_sql("events", conn, if_exists="replace", index=False)
         fixtures_df.to_sql("fixtures", conn, if_exists="replace", index=False)
 
-        # 4. Create History Table and Fetch Player Match Histories
+        # 4. Create History & Past Season Tables, then fetch
         create_history_table(conn)
+        create_past_seasons_table(conn)
         player_ids = players_df["id"].tolist()
         fetch_all_player_histories(player_ids, conn, session, headers)
 

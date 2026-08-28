@@ -2,358 +2,591 @@ import html
 import streamlit as st
 
 
-THEME_CSS = """
+def get_theme_css(is_dark: bool = True) -> str:
+    if is_dark:
+        bg_app = "#0a0a0a"
+        bg_card = "#141414"
+        bg_list_card = "#111111"
+        border_color = "#222222"
+        input_border = "#2e2e2e"
+        input_bg = "#141414"
+        text_main = "#ffffff"
+        text_sub = "#94a3b8"
+        text_meta = "#64748b"
+        placeholder_color = "#64748b"
+        tab_bar_bg = "#141414"
+        tab_active_bg = "#1e293b"
+        tab_inactive_txt = "#94a3b8"
+        tab_active_txt = "#9BBEED"
+        tag_gray_bg = "rgba(255, 255, 255, 0.06)"
+        tag_gray_txt = "#94a3b8"
+        tag_gray_border = "#2a2a2a"
+        header_border = "#1a1a1a"
+        df_filter = "none"
+        toggle_track_off = "#334155"
+        toggle_border_off = "#475569"
+        
+        # High contrast pastel tag text for Dark Mode
+        tag_blue_txt = "#9BBEED"
+        tag_green_txt = "#4ade80" 
+        tag_red_txt = "#f87171" 
+        tag_yellow_txt = "#facc15" 
+    else:
+        bg_app = "#f8fafc"
+        bg_card = "#ffffff"
+        bg_list_card = "#ffffff"
+        border_color = "#e2e8f0"
+        input_border = "#cbd5e1"
+        input_bg = "#ffffff"
+        text_main = "#0f172a"
+        text_sub = "#334155"
+        text_meta = "#64748b"
+        placeholder_color = "#64748b"
+        tab_bar_bg = "#e2e8f0"
+        tab_active_bg = "#ffffff"
+        tab_inactive_txt = "#334155"
+        tab_active_txt = "#1d4ed8"
+        tag_gray_bg = "#f1f5f9"
+        tag_gray_txt = "#334155"
+        tag_gray_border = "#cbd5e1"
+        header_border = "#e2e8f0"
+        df_filter = "invert(0.92) hue-rotate(180deg) brightness(1.02)"
+        toggle_track_off = "#cbd5e1"
+        toggle_border_off = "#94a3b8"
+        
+        # Deep contrast tag text for Light Mode
+        tag_blue_txt = "#1e40af"
+        tag_green_txt = "#15803d"
+        tag_red_txt = "#b91c1c"
+        tag_yellow_txt = "#a16207"
+
+    return f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+/* Modern Font Upgrades (Outfit for headings, Inter for FPL-style data tables) */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap');
 
-html, body, [class*="css"] {
+html, body, [class*="css"] {{
     font-family: 'Inter', sans-serif;
-}
+}}
 
-.stApp {
-    background: #0a0a0a;
-}
+h1, h2, h3, h4, h5, h6, .stSubheader {{
+    font-family: 'Outfit', sans-serif !important;
+    color: {text_main} !important;
+}}
 
-/* Hide default menu and footer, but keep header container transparent for the sidebar toggle */
-#MainMenu, footer {
+.stApp {{
+    background: {bg_app} !important;
+}}
+
+#MainMenu, footer {{
     visibility: hidden;
     height: 0;
-}
+}}
 
-header[data-testid="stHeader"] {
+header[data-testid="stHeader"] {{
     background: transparent !important;
     z-index: 100 !important;
-}
+}}
 
-/* Explicitly style and show the sidebar collapse/expand toggle button */
-[data-testid="stSidebarCollapsedControl"] {
+/* Sidebar Base Styling */
+.stApp [data-testid="stSidebarCollapsedControl"] {{
     display: flex !important;
     visibility: visible !important;
     z-index: 999999 !important;
-    color: #ffffff !important;
-    background-color: #141414 !important;
-    border: 1px solid #222 !important;
+    color: {text_main} !important;
+    background-color: {bg_card} !important;
+    border: 1px solid {input_border} !important;
     border-radius: 8px !important;
     margin-left: 0.5rem !important;
     margin-top: 0.5rem !important;
-}
+}}
 
-[data-testid="stSidebarCollapsedControl"]:hover {
-    background-color: #222 !important;
-    border-color: #333 !important;
-}
-
-.block-container {
+.block-container {{
     padding-top: 1.5rem;
     padding-bottom: 2rem;
     max-width: 1400px;
-}
+}}
 
-[data-testid="stSidebar"] {
-    background: #0a0a0a;
-    border-right: 1px solid #1f1f1f;
-}
+.stApp [data-testid="stSidebar"] {{
+    background: {bg_app} !important;
+    border-right: 1px solid {border_color} !important;
+}}
 
-[data-testid="stSidebar"] > div:first-child {
-    background: #0a0a0a;
-}
+.stApp [data-testid="stSidebar"] > div:first-child {{
+    background: {bg_app} !important;
+}}
 
-.sidebar-card {
-    background: #141414;
-    border: 1px solid #222;
+.sidebar-card {{
+    background: {bg_card};
+    border: 1px solid {border_color};
     border-radius: 12px;
     padding: 1rem 1.1rem;
     margin-bottom: 1rem;
-}
+    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+}}
 
-.sidebar-card h4 {
+.sidebar-card h4 {{
     margin: 0 0 0.75rem 0;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #666;
-}
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: {text_meta};
+}}
 
-.sidebar-stat {
+.sidebar-stat {{
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 0.45rem 0;
-    border-bottom: 1px solid #1a1a1a;
+    border-bottom: 1px solid {border_color};
     font-size: 0.875rem;
-}
+}}
 
-.sidebar-stat:last-child { border-bottom: none; }
-.sidebar-stat .label { color: #888; }
-.sidebar-stat .value { color: #fff; font-weight: 600; }
+.sidebar-stat:last-child {{ border-bottom: none; }}
+.sidebar-stat .label {{ color: {text_sub}; font-weight: 500; }}
+.sidebar-stat .value {{ color: {text_main}; font-weight: 700; }}
 
-.top-bar {
+/* ── OVERHAULED TOP BAR ── */
+.top-bar {{
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.25rem 0 1.25rem 0;
-    border-bottom: 1px solid #1a1a1a;
+    padding: 0.5rem 0 1.5rem 0;
+    border-bottom: 1px solid {header_border};
     margin-bottom: 1.5rem;
-}
+}}
 
-.top-bar-brand {
+.top-bar-brand {{
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-}
+}}
 
-.top-bar-logo {
-    width: 36px;
-    height: 36px;
-    background: linear-gradient(135deg, #22c55e, #16a34a);
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.1rem;
-}
+.top-bar-title {{
+    font-family: 'Outfit', sans-serif;
+    font-size: 3.2rem; 
+    font-weight: 600; 
+    letter-spacing: -0.03em;
+    color: {text_main};
+    line-height: 1.1;
+}}
 
-.top-bar-title {
-    font-size: 1.35rem;
-    font-weight: 800;
-    letter-spacing: 0.06em;
-    color: #fff;
-    text-transform: uppercase;
-}
+.top-bar-sub {{
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+    color: {text_sub};
+    font-weight: 500;
+    margin-top: 6px;
+}}
 
-.top-bar-sub {
-    font-size: 0.75rem;
-    color: #555;
-    letter-spacing: 0.04em;
-}
+/* ── COMPACT & MODERN SECTION HEADER ── */
+.section-card {{
+    background: transparent !important;
+    border: none !important;
+    border-left: 4px solid #2563eb !important;
+    border-radius: 0 !important;
+    padding: 0.25rem 0 0.25rem 1rem !important;
+    margin-top: 0.5rem !important;
+    margin-bottom: 1.5rem !important;
+}}
 
-.stats-banner {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    margin-bottom: 1.25rem;
-    flex-wrap: wrap;
-    gap: 1rem;
-}
+.section-card h3 {{
+    margin: 0 0 0.35rem 0 !important;
+    font-size: 1.45rem !important;
+    font-weight: 700 !important;
+    color: {text_main} !important;
+    letter-spacing: -0.01em !important;
+}}
 
-.stats-banner-left h1 {
-    font-size: 2.5rem;
-    font-weight: 800;
-    color: #fff;
-    margin: 0;
-    line-height: 1;
-    letter-spacing: -0.02em;
-}
+.section-card .section-desc {{
+    color: {text_sub} !important;
+    font-size: 0.9rem !important;
+    font-weight: 500 !important;
+    margin: 0 !important;
+}}
 
-.stats-banner-left .sub-stats {
-    margin-top: 0.5rem;
-    font-size: 0.875rem;
-    color: #666;
-}
-
-.stats-banner-left .sub-stats .green { color: #22c55e; font-weight: 600; }
-.stats-banner-left .sub-stats .red { color: #ef4444; font-weight: 600; }
-
-.section-card {
-    background: #141414;
-    border: 1px solid #222;
-    border-radius: 12px;
-    padding: 1.25rem;
-    margin-bottom: 1rem;
-}
-
-.section-card h3 {
-    margin: 0 0 0.25rem 0;
-    font-size: 1rem;
-    font-weight: 700;
-    color: #fff;
-}
-
-.section-card .section-desc {
-    color: #666;
-    font-size: 0.8rem;
-    margin-bottom: 1rem;
-}
-
-.list-card {
-    background: #111;
-    border: 1px solid #1e1e1e;
+.list-card {{
+    background: {bg_list_card};
+    border: 1px solid {border_color};
     border-radius: 10px;
     padding: 1rem 1.15rem;
     margin-bottom: 0.5rem;
-    transition: border-color 0.15s;
-}
+    box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+}}
 
-.list-card:hover {
-    border-color: #333;
-}
-
-.list-card-title {
-    font-size: 0.95rem;
-    font-weight: 700;
-    color: #fff;
+.list-card-title {{
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: {text_main};
     margin-bottom: 0.5rem;
-}
+}}
 
-.list-card-tags {
+.list-card-tags {{
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem;
     margin-bottom: 0.5rem;
-}
+}}
 
-.tag {
+.tag {{
     display: inline-block;
     padding: 0.15rem 0.55rem;
     border-radius: 999px;
     font-size: 0.7rem;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-}
-
-.tag-green { background: rgba(34, 197, 94, 0.15); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.3); }
-.tag-red { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
-.tag-blue { background: rgba(59, 130, 246, 0.15); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.3); }
-.tag-gray { background: rgba(255, 255, 255, 0.06); color: #888; border: 1px solid #2a2a2a; }
-.tag-yellow { background: rgba(234, 179, 8, 0.15); color: #eab308; border: 1px solid rgba(234, 179, 8, 0.3); }
-
-.list-card-meta {
-    font-size: 0.78rem;
-    color: #555;
-    line-height: 1.5;
-}
-
-.list-card-meta span { color: #777; }
-
-.progress-bar-wrap {
-    margin-top: 0.5rem;
-    background: #1a1a1a;
-    border-radius: 999px;
-    height: 4px;
-    overflow: hidden;
-}
-
-.progress-bar-fill {
-    height: 100%;
-    border-radius: 999px;
-    background: linear-gradient(90deg, #22c55e, #16a34a);
-}
-
-.progress-bar-fill.red {
-    background: linear-gradient(90deg, #ef4444, #dc2626);
-}
-
-[data-testid="stTabs"] [data-baseweb="tab-list"] {
-    gap: 0;
-    background: #111;
-    border: 1px solid #222;
-    border-radius: 10px;
-    padding: 4px;
-}
-
-[data-testid="stTabs"] [data-baseweb="tab"] {
-    background: transparent;
-    border-radius: 8px;
-    color: #666;
-    font-weight: 600;
-    font-size: 0.8rem;
-    padding: 0.5rem 1rem;
-    border: none;
-}
-
-[data-testid="stTabs"] [aria-selected="true"] {
-    background: #1a1a1a !important;
-    color: #22c55e !important;
-}
-
-[data-testid="stTabs"] [data-baseweb="tab-highlight"],
-[data-testid="stTabs"] [data-baseweb="tab-border"] {
-    display: none;
-}
-
-.stButton > button[kind="primary"],
-.stButton > button {
-    background: #22c55e;
-    color: #000;
-    border: none;
-    border-radius: 8px;
     font-weight: 700;
-    font-size: 0.85rem;
-    padding: 0.55rem 1.25rem;
-    transition: background 0.15s;
-}
+    letter-spacing: 0.02em;
+}}
 
-.stButton > button:hover {
-    background: #16a34a;
-    color: #000;
-    border: none;
-}
+/* Dynamic High-Contrast Tag Colors */
+.tag-green {{ background: rgba(34, 197, 94, 0.15); color: {tag_green_txt}; border: 1px solid rgba(34, 197, 94, 0.3); }}
+.tag-red {{ background: rgba(239, 68, 68, 0.15); color: {tag_red_txt}; border: 1px solid rgba(239, 68, 68, 0.3); }}
+.tag-blue {{ background: rgba(155, 190, 237, 0.25); color: {tag_blue_txt}; border: 1px solid #9BBEED; }}
+.tag-yellow {{ background: rgba(234, 179, 8, 0.18); color: {tag_yellow_txt}; border: 1px solid rgba(234, 179, 8, 0.35); }}
+.tag-gray {{ background: {tag_gray_bg}; color: {tag_gray_txt}; border: 1px solid {tag_gray_border}; }}
 
-[data-testid="stMetric"] {
-    background: #141414;
-    border: 1px solid #222;
-    border-radius: 10px;
-    padding: 0.85rem 1rem;
-}
+.list-card-meta {{
+    font-size: 0.78rem;
+    color: {text_sub};
+    line-height: 1.5;
+}}
 
-[data-testid="stMetricLabel"] {
-    color: #666 !important;
-    font-size: 0.75rem !important;
-    font-weight: 600 !important;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
+.list-card-meta span {{ color: {text_meta}; font-weight: 600; }}
 
-[data-testid="stMetricValue"] {
-    color: #fff !important;
-    font-weight: 700 !important;
-}
+/* ── DISTINCT, SEPARATED TABS OVERHAUL ── */
+.stApp div[data-testid="stTabs"] {{
+    background-color: transparent !important;
+}}
 
-[data-testid="stDataFrame"] {
-    border: 1px solid #222;
-    border-radius: 10px;
-    overflow: hidden;
-}
+/* Container has no background, just spacing */
+.stApp div[data-testid="stTabs"] [role="tablist"] {{
+    gap: 12px !important;
+    background-color: transparent !important;
+    border: none !important;
+    padding: 0.25rem 0 0.75rem 0 !important;
+}}
 
-div[data-testid="stAlert"] {
-    border-radius: 10px;
-    border: 1px solid #222;
-}
-
-.stTextInput input, .stSelectbox div[data-baseweb="select"],
-.stSlider, .stNumberInput input {
-    background: #141414 !important;
-    border-color: #222 !important;
+/* Each tab is a distinct button */
+.stApp div[data-testid="stTabs"] button[role="tab"] {{
+    background-color: {tab_bar_bg} !important;
+    border: 1px solid {border_color} !important;
     border-radius: 8px !important;
-    color: #fff !important;
-}
+    padding: 0.6rem 1.4rem !important;
+    transition: all 0.2s ease-in-out !important;
+}}
 
-label, .stMarkdown p, .stCaption {
-    color: #888 !important;
-}
+.stApp div[data-testid="stTabs"] button[role="tab"][aria-selected="false"] p,
+.stApp div[data-testid="stTabs"] button[role="tab"][aria-selected="false"] span,
+.stApp div[data-testid="stTabs"] button[role="tab"][aria-selected="false"] div,
+.stApp div[data-testid="stTabs"] button[role="tab"][aria-selected="false"] * {{
+    color: {tab_inactive_txt} !important;
+    -webkit-text-fill-color: {tab_inactive_txt} !important;
+    font-weight: 600 !important;
+    font-size: 0.9rem !important;
+    opacity: 0.85 !important;
+    visibility: visible !important;
+}}
 
-h1, h2, h3, .stSubheader {
-    color: #fff !important;
-}
+.stApp div[data-testid="stTabs"] button[role="tab"][aria-selected="false"]:hover {{
+    background-color: {bg_card} !important;
+    border-color: {text_sub} !important;
+    opacity: 1 !important;
+}}
 
-.gw-badge {
+/* Active Tab elevates and gets a distinct blue border */
+.stApp div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
+    background-color: {tab_active_bg} !important;
+    border: 1px solid #2563eb !important;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.06) !important;
+    transform: translateY(-1px);
+}}
+
+.stApp div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] p,
+.stApp div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] span,
+.stApp div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] div,
+.stApp div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] * {{
+    color: {tab_active_txt} !important;
+    -webkit-text-fill-color: {tab_active_txt} !important;
+    font-weight: 800 !important;
+    font-size: 0.9rem !important;
+    opacity: 1 !important;
+}}
+
+/* Removes default Streamlit blue underline */
+.stApp div[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+.stApp div[data-testid="stTabs"] [data-baseweb="tab-border"] {{
+    display: none !important;
+}}
+
+/* ── BULLETPROOF SELECTBOX & DROPDOWNS ── */
+.stApp div[data-testid="stSelectbox"] > div > div,
+.stApp div[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+.stApp div[data-testid="stMultiSelect"] > div > div,
+.stApp div[data-testid="stMultiSelect"] [data-baseweb="select"] > div,
+.stApp div[data-baseweb="select"] > div {{
+    background-color: {input_bg} !important;
+    background: {input_bg} !important;
+    border: 1px solid {input_border} !important;
+    border-radius: 8px !important;
+}}
+
+.stApp div[data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within,
+.stApp div[data-testid="stMultiSelect"] [data-baseweb="select"] > div:focus-within,
+.stApp div[data-baseweb="select"] > div:focus-within {{
+    border-color: #2563eb !important;
+    box-shadow: 0 0 0 1px #2563eb !important;
+}}
+
+.stApp div[data-testid="stSelectbox"] *,
+.stApp div[data-testid="stMultiSelect"] *,
+.stApp div[data-baseweb="select"] * {{
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+}}
+
+.stApp div[data-testid="stSelectbox"] svg,
+.stApp div[data-testid="stMultiSelect"] svg,
+.stApp div[data-baseweb="select"] svg {{
+    fill: {text_main} !important;
+    color: {text_main} !important;
+}}
+
+/* Dropdown Menu Overlay */
+.stApp div[data-baseweb="popover"],
+.stApp div[data-baseweb="popover"] > div,
+.stApp ul[data-baseweb="menu"],
+.stApp ul[role="listbox"],
+.stApp li[role="option"] {{
+    background-color: {bg_card} !important;
+    background: {bg_card} !important;
+    color: {text_main} !important;
+    border-color: {border_color} !important;
+}}
+
+.stApp div[data-baseweb="popover"] *,
+.stApp ul[role="listbox"] *,
+.stApp li[role="option"] * {{
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+}}
+
+.stApp li[role="option"]:hover,
+.stApp li[role="option"][aria-selected="true"] {{
+    background-color: {tab_bar_bg} !important;
+    background: {tab_bar_bg} !important;
+}}
+
+/* ── BULLETPROOF TOGGLE SWITCH ── */
+.stApp div[data-testid="stToggle"] label {{
+    cursor: pointer !important;
+}}
+
+.stApp div[data-testid="stToggle"] label p,
+.stApp div[data-testid="stToggle"] label span {{
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+    font-weight: 600 !important;
+    font-size: 0.88rem !important;
+}}
+
+/* Toggle Track (Off State) */
+.stApp div[data-testid="stToggle"] label > div:first-of-type {{
+    background-color: {toggle_track_off} !important;
+    background: {toggle_track_off} !important;
+    border: 1px solid {toggle_border_off} !important;
+    opacity: 1 !important;
+}}
+
+/* Toggle Track (On State) */
+.stApp div[data-testid="stToggle"] input:checked + div {{
+    background-color: #2563eb !important;
+    background: #2563eb !important;
+    border-color: #2563eb !important;
+}}
+
+/* Toggle Thumb Handle */
+.stApp div[data-testid="stToggle"] label > div:first-of-type > div {{
+    background-color: #ffffff !important;
+    background: #ffffff !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
+    border: none !important;
+}}
+
+/* ── STRICT CHECKBOX FIX ── */
+.stApp div[data-testid="stCheckbox"] label > span:first-of-type,
+.stApp div[data-testid="stCheckbox"] [data-baseweb="checkbox"] > span:first-of-type {{
+    background-color: {input_bg} !important;
+    background: {input_bg} !important;
+    border: 1px solid {input_border} !important;
+    border-radius: 4px !important;
+}}
+
+.stApp div[data-testid="stCheckbox"] input:checked + span,
+.stApp div[data-testid="stCheckbox"] [data-baseweb="checkbox"] input:checked + span {{
+    background-color: #2563eb !important;
+    background: #2563eb !important;
+    border-color: #2563eb !important;
+}}
+
+.stApp div[data-testid="stCheckbox"] svg {{
+    stroke: #ffffff !important;
+    fill: #ffffff !important;
+}}
+
+.stApp div[data-testid="stCheckbox"] label p {{
+    color: {text_main} !important;
+    font-weight: 500 !important;
+}}
+
+/* ── SLIDERS ── */
+.stApp div[data-baseweb="slider"] div[role="slider"] {{
+    background-color: #2563eb !important;
+    border: 2px solid #ffffff !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important;
+}}
+
+.stApp div[data-baseweb="slider"] > div > div > div {{
+    background-color: #2563eb !important;
+}}
+
+.stApp div[data-baseweb="slider"] p {{
+    color: {text_sub} !important;
+    font-weight: 600 !important;
+}}
+
+/* ── BUTTONS ── */
+.stApp .stButton > button,
+.stApp .stButton > button[kind="primary"],
+.stApp .stButton > button[kind="secondary"] {{
+    background-color: #2563eb !important;
+    color: #ffffff !important;
+    border: 1px solid #1d4ed8 !important;
+    border-radius: 8px !important;
+    font-weight: 700 !important;
+    font-size: 0.85rem !important;
+    padding: 0.55rem 1.25rem !important;
+    box-shadow: 0 2px 4px rgba(37, 99, 235, 0.15) !important;
+}}
+
+.stApp .stButton > button:hover {{
+    background-color: #1d4ed8 !important;
+    border-color: #1e40af !important;
+    color: #ffffff !important;
+}}
+
+/* ── GUIDE POPOVER BUTTON ── */
+.stApp div[data-testid="stPopover"] > button,
+.stApp div[data-testid="stPopover"] button {{
+    background-color: {bg_card} !important;
+    color: {text_main} !important;
+    border: 1px solid {input_border} !important;
+    border-radius: 8px !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.02) !important;
+}}
+
+.stApp div[data-testid="stPopover"] > button *,
+.stApp div[data-testid="stPopover"] button * {{
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+    font-weight: 600 !important;
+}}
+
+/* ── METRICS (Fixes Text / Number Truncation) ── */
+.stApp [data-testid="stMetric"] {{
+    background: {bg_card} !important;
+    border: 1px solid {border_color} !important;
+    border-radius: 10px !important;
+    padding: 0.75rem 0.85rem !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+    overflow: visible !important;
+}}
+
+.stApp [data-testid="stMetricLabel"] {{
+    font-family: 'Outfit', sans-serif !important;
+    color: {text_sub} !important;
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.02em;
+    overflow: visible !important;
+    white-space: normal !important; 
+}}
+
+.stApp [data-testid="stMetricValue"], 
+.stApp [data-testid="stMetricValue"] > div {{
+    color: {text_main} !important;
+    font-weight: 800 !important;
+    font-size: 1.25rem !important; 
+    overflow: visible !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+}}
+
+/* ── TABLES & DATAFRAMES ── */
+.stApp div[data-testid="stDataFrame"] {{
+    border: 1px solid {border_color} !important;
+    border-radius: 10px !important;
+    overflow: hidden !important;
+    background: {bg_card} !important;
+    filter: {df_filter} !important;
+}}
+
+.stApp div[data-testid="stAlert"] {{
+    border-radius: 10px;
+    border: 1px solid {border_color};
+}}
+
+/* ── INPUT FIELDS ── */
+.stApp div[data-baseweb="input"],
+.stApp div[data-baseweb="base-input"],
+.stApp .stTextInput > div > div {{
+    background-color: {input_bg} !important;
+    border: 1px solid {input_border} !important;
+    border-radius: 8px !important;
+}}
+
+.stApp div[data-baseweb="input"]:focus-within,
+.stApp .stTextInput > div > div:focus-within {{
+    border-color: #2563eb !important;
+    box-shadow: 0 0 0 1px #2563eb !important;
+}}
+
+.stApp .stTextInput input, 
+.stApp .stNumberInput input {{
+    background-color: transparent !important;
+    color: {text_main} !important;
+    border: none !important;
+    font-size: 0.9rem !important;
+    font-weight: 500 !important;
+}}
+
+.stApp ::placeholder,
+.stApp input::placeholder,
+.stApp textarea::placeholder,
+.stApp .stTextInput input::placeholder {{
+    color: {placeholder_color} !important;
+    opacity: 0.85 !important;
+}}
+
+.stApp label, .stApp .stMarkdown p, .stApp .stCaption {{
+    color: {text_sub} !important;
+}}
+
+.gw-badge {{
     display: inline-block;
-    background: rgba(34, 197, 94, 0.12);
-    color: #22c55e;
-    border: 1px solid rgba(34, 197, 94, 0.25);
+    background: rgba(37, 99, 235, 0.1);
+    color: #2563eb;
+    border: 1px solid rgba(37, 99, 235, 0.3);
     border-radius: 999px;
     padding: 0.25rem 0.75rem;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     font-weight: 700;
-    letter-spacing: 0.04em;
-}
+    letter-spacing: 0.02em;
+}}
 </style>
 """
 
 
-def apply_theme():
-    st.markdown(THEME_CSS, unsafe_allow_html=True)
+def apply_theme(is_dark: bool = True, *args, **kwargs):
+    st.markdown(get_theme_css(is_dark), unsafe_allow_html=True)
 
 
 def esc(text) -> str:
@@ -373,28 +606,9 @@ def render_top_bar(subtitle: str = ""):
         f"""
         <div class="top-bar">
             <div class="top-bar-brand">
-                <div class="top-bar-logo">⚽</div>
                 <div>
-                    <div class="top-bar-title">FPL Dashboard</div>
+                    <div class="top-bar-title">FPL Optimizer</div>
                     {sub_html}
-                </div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def render_stats_banner(total: int, green_count: int, red_count: int, label: str = "PLAYERS"):
-    st.markdown(
-        f"""
-        <div class="stats-banner">
-            <div class="stats-banner-left">
-                <h1>{total:,} {label}</h1>
-                <div class="sub-stats">
-                    <span class="green">{green_count:,} buy signals</span>
-                    &nbsp;·&nbsp;
-                    <span class="red">{red_count:,} sell signals</span>
                 </div>
             </div>
         </div>
