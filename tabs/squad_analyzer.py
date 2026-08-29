@@ -24,7 +24,7 @@ def get_player_img_url(photo, code=None):
     if not photo_str or "Photo-Missing" in photo_str or photo_str == "None":
         if pd.notna(code) and str(code).strip():
             return f"https://resources.premierleague.com/premierleague/photos/players/110x140/p{int(code)}.png"
-        return "https://resources.premierleague.com/premierleague/photos/players/110x140/Photo-Missing.png"
+        return SILHOUETTE_BASE64
 
     base_name = photo_str.replace(".jpg", "").replace(".png", "")
     if not base_name.startswith("p"):
@@ -153,7 +153,6 @@ def fetch_motw_manager_data(target_gw: int):
 
 
 def quick_sync_live_prices(conn):
-    """Fetches bootstrap-static to update player costs and availability in SQLite instantly."""
     try:
         res = requests.get("https://fantasy.premierleague.com/api/bootstrap-static/", timeout=10)
         if res.status_code == 200:
@@ -419,7 +418,6 @@ def render_pitch_component(starters_df: pd.DataFrame, bench_df: pd.DataFrame, is
             img_url = get_player_img_url(p.get("photo"), p.get("code"))
             player_name = p.get("Player", "")
 
-            # Show live points during matches, or stacked xP + Price for upcoming matches
             if is_live:
                 pts = int(p.get("GW_Points", 0))
                 mult_txt = f" ({mult}x)" if mult > 1 else ""
@@ -493,7 +491,7 @@ def render_pitch_component(starters_df: pd.DataFrame, bench_df: pd.DataFrame, is
 
     full_pitch_html = (
         f'<style>'
-        f'.pitch-board-wrap {{ width: 100%; max-width: 100%; margin: 0 auto 1.5rem auto; }}'
+        f'.pitch-board-wrap {{ width: 100%; max-width: 100%; margin: 0 auto 1rem auto; }}'
         f'.tactical-pitch {{'
         f'  background: radial-gradient(circle at 50% 50%, #154323 0%, #0c2714 100%);'
         f'  border: 2px solid rgba(255, 255, 255, 0.2);'
@@ -741,7 +739,6 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             """
             squad_df = pd.read_sql(squad_query, conn, params=pick_ids)
 
-            # Dynamically calculate squad value from live player costs in database
             squad_value = float(squad_df["Cost"].sum()) if not squad_df.empty else 100.0
             total_team_value = squad_value + bank_balance
 
@@ -784,6 +781,13 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
 
             st.markdown("<br>", unsafe_allow_html=True)
 
+            # Theme detection for banners
+            is_dark = st.session_state.get("theme_mode", "dark") == "dark"
+            banner_bg = "#151d24" if is_dark else "#ffffff"
+            banner_border = "rgba(255, 255, 255, 0.08)" if is_dark else "#e2e8f0"
+            banner_title_col = "#f8fafc" if is_dark else "#0f172a"
+            banner_sub_col = "#94a3b8" if is_dark else "#64748b"
+
             # ── SCENARIO A: FINISHED OR ONGOING (LIVE TRACKING) ───────────────
             if is_live_or_finished:
                 motw_manager_data = fetch_motw_manager_data(selected_eval_gw)
@@ -806,11 +810,11 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
 
                 st.markdown(
                     f"""
-                    <div style="background-color: #151d24; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 1.2rem; margin: 0.5rem 0 1.5rem 0;">
+                    <div style="background-color: {banner_bg}; border: 1px solid {banner_border}; border-radius: 10px; padding: 1.2rem; margin: 0.5rem 0 1.5rem 0; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <div>
-                                <span style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">{banner_title}</span><br>
-                                <span style="font-size: 0.85rem; color: #94a3b8;">{score_subtext} · {top_subtext}</span>
+                                <span style="font-size: 1.1rem; font-weight: 700; color: {banner_title_col};">{banner_title}</span><br>
+                                <span style="font-size: 0.85rem; color: {banner_sub_col};">{score_subtext} · {top_subtext}</span>
                             </div>
                             <span style="font-size: 1.3rem; font-weight: 800; color: {'#22c55e' if pts_diff >= 0 else '#ef4444'};">{pts_diff:+d} pts vs Comp</span>
                         </div>
@@ -946,7 +950,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                                     )
 
                     with col_news:
-                        st.markdown('<div class="section-card"><h3>Comparison Info</h3></div>', unsafe_allow_html=True)
+                        st.markdown("#### ℹ️ Match Intel")
                         if comp_data:
                             if super_team_mode:
                                 st.info(f"🌟 **{comp_title}** features the theoretical highest scorers with **{comp_pts} points**.")
@@ -954,6 +958,20 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                                 st.info(f"👑 **{comp_title}** scored **{comp_pts} points** in GW{selected_eval_gw}.")
                         else:
                             st.info("Live scoring in progress. Top performer updating as fixtures conclude.")
+
+                        flagged_players = squad_df[
+                            (squad_df["Status"] != "a") &
+                            (squad_df["News"].notna()) &
+                            (squad_df["News"] != "") &
+                            (squad_df["News"] != "None")
+                        ]
+                        if not flagged_players.empty:
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            st.markdown("##### ⚠️ Availability Flags")
+                            for _, row in flagged_players.iterrows():
+                                chance_val = row["Chance"]
+                                chance_str = f" ({int(float(chance_val))}% chance)" if pd.notna(chance_val) and str(chance_val).strip() not in ("", "None") else ""
+                                st.warning(f"**{row['Player']}**{chance_str}: {row['News']}")
 
             # ── SCENARIO B: UPCOMING GAMEWEEKS ────────────────────────────────
             else:
@@ -1012,9 +1030,9 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
 
                 st.markdown(
                     f"""
-                    <div style="background-color: #151d24; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 1.2rem; margin: 0.5rem 0 1rem 0;">
+                    <div style="background-color: {banner_bg}; border: 1px solid {banner_border}; border-radius: 10px; padding: 1.2rem; margin: 0.5rem 0 1rem 0; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem;">
-                            <span style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">GW{selected_eval_gw} Squad Rating</span>
+                            <span style="font-size: 1.1rem; font-weight: 700; color: {banner_title_col};">GW{selected_eval_gw} Squad Rating</span>
                             <span style="font-size: 1.4rem; font-weight: 800; color: #22c55e;">{squad_rating}%</span>
                         </div>
                     </div>
@@ -1149,7 +1167,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                                     )
 
                     with col_news:
-                        st.markdown('<div class="section-card"><h3>Squad News</h3></div>', unsafe_allow_html=True)
+                        st.markdown("#### 📰 Squad News")
                         flagged_players = squad_df[
                             (squad_df["Status"] != "a") &
                             (squad_df["News"].notna()) &

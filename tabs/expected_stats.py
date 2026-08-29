@@ -1,7 +1,7 @@
 from data import get_manager_squad_ids
 import pandas as pd
 import streamlit as st
-from theme import fmt_num, render_list_card, section_header
+from theme import SILHOUETTE_BASE64, fmt_num, render_list_card, render_sortable_table, section_header
 
 pos_map = {"GKP": 1, "DEF": 2, "MID": 3, "FWD": 4}
 
@@ -11,7 +11,7 @@ def get_player_img_url(photo, code=None):
     if not photo_str or "Photo-Missing" in photo_str or photo_str == "None":
         if pd.notna(code) and str(code).strip():
             return f"https://resources.premierleague.com/premierleague/photos/players/110x140/p{int(code)}.png"
-        return "https://resources.premierleague.com/premierleague/photos/players/110x140/Photo-Missing.png"
+        return SILHOUETTE_BASE64
 
     base_name = photo_str.replace(".jpg", "").replace(".png", "")
     if not base_name.startswith("p"):
@@ -36,7 +36,7 @@ def render_expected_stats_tab(conn, current_gw):
                 * **xG / xA / xGI:** Expected Goals, Assists, and Goal Involvements based on shot location and chance quality.
                 * **ΔxG (xG Delta):** Calculated as `xG - Actual Goals`.
                     * 🟢 **Buy Signal (ΔxG ≥ +0.5):** Creating/receiving high-quality chances but unlucky with finishing.
-                    * 🔴 **Sell Signal (ΔxG ≤ -0.5):** Outperforming underlying metrics significantly. Current scoring conversion is historically unsustainable.
+                    * 🔴 **Sell Signal (ΔxG ≤ -0.5):** Outperforming underlying metrics significantly. Current scoring conversion is unsustainable.
                 * **xGI / 90:** Current season chance involvement per 90 minutes played.
                 * **Career GI / 90:** Multi-season historical actual `(Goals + Assists) / Minutes * 90` baseline from prior Premier League campaigns.
                 """
@@ -151,40 +151,27 @@ def render_expected_stats_tab(conn, current_gw):
     WHERE p.minutes >= {min_minutes} {pos_clause}
     """
     df_xgi = pd.read_sql(query, conn)
-    for col_name in (
-        "Price",
-        "Minutes",
-        "Total_Points",
-        "Goals",
-        "Assists",
-        "Clean_Sheets",
-        "Saves",
-        "xG",
-        "xA",
-        "xGI",
-        "xG_Delta",
-        "xGI_per_90",
-        "Career_GI_90",
-        "Career_Pts_90",
-        "Career_Mins",
-    ):
+
+    current_season_numeric = [
+        "Price", "Minutes", "Total_Points", "Goals", "Assists", "Clean_Sheets",
+        "Saves", "xG", "xA", "xGI", "xG_Delta", "xGI_per_90"
+    ]
+    for col_name in current_season_numeric:
+        if col_name in df_xgi.columns:
+            df_xgi[col_name] = pd.to_numeric(df_xgi[col_name], errors="coerce").fillna(0)
+
+    career_numeric = ["Career_GI_90", "Career_Pts_90", "Career_Mins"]
+    for col_name in career_numeric:
         if col_name in df_xgi.columns:
             df_xgi[col_name] = pd.to_numeric(df_xgi[col_name], errors="coerce")
 
-    # Clean any invalid rows
     df_xgi = df_xgi.dropna(subset=["Player"])
     df_xgi = df_xgi[df_xgi["Player"].astype(str).str.strip() != ""]
-
-    df_xgi["Photo"] = [
-        get_player_img_url(ph, c) for ph, c in zip(df_xgi["photo"], df_xgi["code"])
-    ]
 
     active_manager_id_tab1 = st.session_state.get("manager_id", "").strip()
     if only_my_squad_tab1:
         if not active_manager_id_tab1:
-            st.info(
-                "💡 Enter your FPL Team ID in the sidebar or Squad Analyzer tab to filter by your squad."
-            )
+            st.info("💡 Enter your FPL Team ID in the top bar to filter by your squad.")
             squad_ids_tab1 = []
         else:
             squad_ids_tab1 = get_manager_squad_ids(active_manager_id_tab1, current_gw)
@@ -213,99 +200,181 @@ def render_expected_stats_tab(conn, current_gw):
 
     if df_xgi.empty:
         st.info(f"No players found matching '{search_query}'. Try adjusting your filters.")
-    else:
-        top_cards = df_xgi.head(min(4, len(df_xgi)))
-        card_cols = st.columns(len(top_cards))
-        for i, (_, row) in enumerate(top_cards.iterrows()):
-            delta = float(row["xG_Delta"])
-            if delta >= 0.5:
-                signal_tag = ("Buy Signal", "green")
-            elif delta <= -0.5:
-                signal_tag = ("Sell Signal", "red")
-            else:
-                signal_tag = ("Neutral", "gray")
-            with card_cols[i]:
-                hist_note = (
-                    f" · <span>Career GI/90</span> {fmt_num(row['Career_GI_90'])}"
-                    if pd.notna(row.get("Career_GI_90")) and show_career_baseline
-                    else ""
-                )
-                card_img = get_player_img_url(row.get("photo"), row.get("code"))
-                render_list_card(
-                    f"{row['Player']} ({row['Team']})",
-                    [(row["Pos"], "blue"), signal_tag],
-                    f'<span>Price</span> £{fmt_num(row["Price"], ".1f")} · <span>xGI</span>'
-                    f' {fmt_num(row["xGI"])} · <span>Pts</span>'
-                    f' {int(float(row["Total_Points"]))} · <span>ΔxG</span>'
-                    f' {fmt_num(delta, "+.2f")}{hist_note}',
-                    img_url=card_img,
-                )
+        return
 
-        def highlight_xg_delta(val):
-            try:
-                val = float(val)
-                if val >= 0.5:
-                    return "background-color: rgba(34, 197, 94, 0.25)"
-                if val > 0:
-                    return "background-color: rgba(34, 197, 94, 0.1)"
-                if val <= -0.5:
-                    return "background-color: rgba(239, 68, 68, 0.2)"
-            except (ValueError, TypeError):
-                pass
-            return ""
+    top_cards = df_xgi.head(min(4, len(df_xgi)))
+    card_cols = st.columns(len(top_cards))
+    for i, (_, row) in enumerate(top_cards.iterrows()):
+        delta = float(row["xG_Delta"])
+        if delta >= 0.5:
+            signal_tag = ("Buy Signal", "green")
+        elif delta <= -0.5:
+            signal_tag = ("Sell Signal", "red")
+        else:
+            signal_tag = ("Neutral", "gray")
+        with card_cols[i]:
+            c_gi = row.get("Career_GI_90")
+            hist_note = (
+                f" · <span>Career GI/90</span> {fmt_num(c_gi)}"
+                if pd.notna(c_gi) and float(c_gi) > 0 and show_career_baseline
+                else ""
+            )
+            card_img = get_player_img_url(row.get("photo"), row.get("code"))
+            render_list_card(
+                f"{row['Player']} ({row['Team']})",
+                [(row["Pos"], "blue"), signal_tag],
+                f'<span>Price</span> £{fmt_num(row["Price"], ".1f")} · <span>xGI</span>'
+                f' {fmt_num(row["xGI"])} · <span>Pts</span>'
+                f' {int(float(row["Total_Points"]))} · <span>ΔxG</span>'
+                f' {fmt_num(delta, "+.2f")}{hist_note}',
+                img_url=card_img,
+            )
 
-        display_cols_tab1 = [
-            "Photo",
-            "Player",
-            "Team",
-            "Pos",
-            "Price",
-            "Minutes",
-            "Total_Points",
-            "Goals",
-            "Assists",
-            "Clean_Sheets",
-            "Saves",
-            "xG",
-            "xA",
-            "xGI",
-            "xG_Delta",
-            "xGI_per_90",
-        ]
+    is_dark = st.session_state.get("theme_mode", "dark") == "dark"
+
+    theme_styles = f"""
+    <style>
+    .unified-table-wrapper {{
+        width: 100%;
+        overflow-x: auto;
+        border: 1px solid {"#222222" if is_dark else "#e2e8f0"};
+        border-radius: 10px;
+        background: {"#141414" if is_dark else "#ffffff"};
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        margin-top: 1rem;
+    }}
+    .unified-table {{
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'Inter', sans-serif;
+        font-size: 0.85rem;
+        color: {"#ffffff" if is_dark else "#0f172a"};
+    }}
+    .unified-table th {{
+        background: {"#18181b" if is_dark else "#f8fafc"};
+        color: {"#94a3b8" if is_dark else "#64748b"};
+        font-family: 'Outfit', sans-serif;
+        font-weight: 600;
+        font-size: 0.78rem;
+        letter-spacing: 0.02em;
+        padding: 0.7rem 0.75rem;
+        border-bottom: 1px solid {"#27272a" if is_dark else "#e2e8f0"};
+        text-align: center;
+        white-space: nowrap;
+    }}
+    .unified-table td {{
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid {"#1f1f23" if is_dark else "#f1f5f9"};
+        vertical-align: middle;
+        text-align: center;
+        white-space: nowrap;
+    }}
+    .unified-table tr:last-child td {{
+        border-bottom: none;
+    }}
+    .unified-table tr:hover td {{
+        background: {"rgba(255, 255, 255, 0.02)" if is_dark else "rgba(0, 0, 0, 0.015)"};
+    }}
+    .player-unified-cell {{
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        white-space: nowrap;
+    }}
+    .player-avatar-circle {{
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        object-fit: cover;
+        object-position: top center;
+        background-color: {"#1e293b" if is_dark else "#e2e8f0"};
+        border: 1px solid {"#2a2a2a" if is_dark else "#cbd5e1"};
+        flex-shrink: 0;
+    }}
+    .player-name-text {{
+        font-weight: 600;
+        color: {"#ffffff" if is_dark else "#0f172a"};
+    }}
+    .pos-pill {{
+        display: inline-block;
+        padding: 0.12rem 0.45rem;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        font-weight: 700;
+    }}
+    .pos-GKP {{ background: rgba(245, 158, 11, 0.18); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); }}
+    .pos-DEF {{ background: rgba(59, 130, 246, 0.18); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }}
+    .pos-MID {{ background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }}
+    .pos-FWD {{ background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }}
+
+    .delta-pill {{
+        display: inline-block;
+        padding: 0.15rem 0.45rem;
+        border-radius: 4px;
+        font-weight: 700;
+        font-size: 0.8rem;
+    }}
+    .delta-buy {{ background: rgba(34, 197, 94, 0.2); color: {"#4ade80" if is_dark else "#15803d"}; }}
+    .delta-sell {{ background: rgba(239, 68, 68, 0.2); color: {"#f87171" if is_dark else "#b91c1c"}; }}
+    .delta-neutral {{ color: {"#94a3b8" if is_dark else "#64748b"}; }}
+    </style>
+    """
+
+    display_df = df_xgi.head(35)
+    html_out = [theme_styles, '<div class="unified-table-wrapper"><table class="unified-table"><thead><tr>']
+    html_out.append('<th style="text-align: left; padding-left: 1rem;">Player</th>')
+    html_out.append('<th>Club</th><th>Pos</th><th>Price</th><th>Mins</th><th>Pts</th><th>Gls</th><th>Ast</th><th>CS</th><th>Saves</th>')
+    html_out.append('<th>xG</th><th>xA</th><th>xGI</th><th>ΔxG</th><th>xGI/90</th>')
+
+    if show_career_baseline:
+        html_out.append('<th>Career GI/90</th><th>Career Pts/90</th><th>Career Mins</th>')
+
+    html_out.append('</tr></thead><tbody>')
+
+    for _, row in display_df.iterrows():
+        p_img = get_player_img_url(row.get("photo"), row.get("code"))
+        delta = float(row["xG_Delta"])
+        delta_cls = "delta-buy" if delta >= 0.5 else ("delta-sell" if delta <= -0.5 else "delta-neutral")
+
+        html_out.append("<tr>")
+        html_out.append(
+            f'<td style="text-align: left; padding-left: 1rem;">'
+            f'<div class="player-unified-cell">'
+            f'<img src="{p_img}" class="player-avatar-circle" onerror="this.src=\'{SILHOUETTE_BASE64}\'">'
+            f'<span class="player-name-text">{row["Player"]}</span>'
+            f'</div></td>'
+        )
+        html_out.append(f'<td>{row["Team"]}</td>')
+        html_out.append(f'<td><span class="pos-pill pos-{row["Pos"]}">{row["Pos"]}</span></td>')
+        html_out.append(f'<td>£{row["Price"]:.1f}</td>')
+        html_out.append(f'<td>{int(row["Minutes"]):,}</td>')
+        html_out.append(f'<td style="font-weight: 700;">{int(row["Total_Points"])}</td>')
+        html_out.append(f'<td>{int(row["Goals"])}</td>')
+        html_out.append(f'<td>{int(row["Assists"])}</td>')
+        html_out.append(f'<td>{int(row["Clean_Sheets"])}</td>')
+        html_out.append(f'<td>{int(row["Saves"])}</td>')
+        html_out.append(f'<td>{row["xG"]:.2f}</td>')
+        html_out.append(f'<td>{row["xA"]:.2f}</td>')
+        html_out.append(f'<td style="font-weight: 700;">{row["xGI"]:.2f}</td>')
+        html_out.append(f'<td><span class="delta-pill {delta_cls}">{delta:+.2f}</span></td>')
+        html_out.append(f'<td>{row["xGI_per_90"]:.2f}</td>')
 
         if show_career_baseline:
-            display_cols_tab1.extend(["Career_GI_90", "Career_Pts_90", "Career_Mins"])
+            c_gi = row.get("Career_GI_90")
+            c_pts = row.get("Career_Pts_90")
+            c_mins = row.get("Career_Mins")
 
-        col_config = {
-            "Photo": st.column_config.ImageColumn("", width="small", help="Player Photo"),
-            "Player": st.column_config.TextColumn("Player"),
-            "Team": st.column_config.TextColumn("Club"),
-            "Pos": st.column_config.TextColumn("Pos"),
-            "Price": st.column_config.NumberColumn("Price", format="£%.1f"),
-            "Minutes": st.column_config.NumberColumn("Mins", format="%d"),
-            "Total_Points": st.column_config.NumberColumn("Pts", format="%d"),
-            "Goals": st.column_config.NumberColumn("Gls", format="%d"),
-            "Assists": st.column_config.NumberColumn("Ast", format="%d"),
-            "Clean_Sheets": st.column_config.NumberColumn("CS", format="%d"),
-            "Saves": st.column_config.NumberColumn("Saves", format="%d"),
-            "xG": st.column_config.NumberColumn("xG", format="%.2f"),
-            "xA": st.column_config.NumberColumn("xA", format="%.2f"),
-            "xGI": st.column_config.NumberColumn("xGI", format="%.2f"),
-            "xG_Delta": st.column_config.NumberColumn("ΔxG", format="%.2f"),
-            "xGI_per_90": st.column_config.NumberColumn("xGI/90", format="%.2f"),
-            "Career_GI_90": st.column_config.NumberColumn("Career GI/90", format="%.2f", help="Career actual (Goals+Assists)/90 from previous Premier League seasons"),
-            "Career_Pts_90": st.column_config.NumberColumn("Career Pts/90", format="%.2f", help="Career FPL Points per 90 from previous seasons"),
-            "Career_Mins": st.column_config.NumberColumn("Career Mins", format="%d", help="Total minutes played in previous Premier League seasons"),
-        }
+            c_gi_str = fmt_num(c_gi) if pd.notna(c_gi) and float(c_gi) > 0 else "—"
+            c_pts_str = fmt_num(c_pts) if pd.notna(c_pts) and float(c_pts) > 0 else "—"
+            c_mins_str = f"{int(c_mins):,}" if pd.notna(c_mins) and float(c_mins) > 0 else "—"
 
-        display_df = df_xgi[display_cols_tab1].head(35)
-        # Exact row-height sizing (35px per row + 35px header + 3px border padding)
-        table_height = (len(display_df) + 1) * 35 + 3
+            html_out.append(f'<td>{c_gi_str}</td>')
+            html_out.append(f'<td>{c_pts_str}</td>')
+            html_out.append(f'<td>{c_mins_str}</td>')
 
-        st.dataframe(
-            display_df.style.map(highlight_xg_delta, subset=["xG_Delta"]),
-            hide_index=True,
-            width="stretch",
-            height=table_height,
-            column_config=col_config,
-        )
+        html_out.append("</tr>")
+
+    html_out.append("</tbody></table></div>")
+
+    full_table_height = (len(display_df) * 45) + 60
+    render_sortable_table("".join(html_out), is_dark=is_dark, height=full_table_height)

@@ -75,7 +75,7 @@ def render_transfer_market_tab(conn, current_gw):
     if only_my_squad_tab5:
         active_manager_id_tab5 = st.session_state.get("manager_id", "").strip()
         if not active_manager_id_tab5:
-            st.info("💡 Enter your FPL Team ID in the sidebar to filter by your squad.")
+            st.info("💡 Enter your FPL Team ID in the top bar to filter by your squad.")
             market_df = market_df.iloc[0:0]
         else:
             squad_ids_tab5 = get_manager_squad_ids(active_manager_id_tab5, current_gw)
@@ -96,10 +96,10 @@ def render_transfer_market_tab(conn, current_gw):
         col_in, col_out = st.columns(2)
 
         with col_in:
-            st.markdown("#### Heating Up")
+            st.markdown("#### 📈 Heating Up")
             heating_df = market_df[market_df["Net_Transfers"] > 0].head(10)
             if heating_df.empty:
-                st.write("No matching players heating up.")
+                st.info("No matching players heating up.")
             else:
                 for _, row in heating_df.iterrows():
                     progress = min((max(0, row["Net_Transfers"]) / THRESHOLD) * 100, 100)
@@ -116,12 +116,12 @@ def render_transfer_market_tab(conn, current_gw):
                     )
 
         with col_out:
-            st.markdown("#### Cooling Down")
+            st.markdown("#### 📉 Cooling Down")
             cooling_df = market_df[market_df["Net_Transfers"] < 0].tail(10).sort_values(
                 by="Net_Transfers", ascending=True
             )
             if cooling_df.empty:
-                st.write("No matching players cooling down.")
+                st.info("No matching players cooling down.")
             else:
                 for _, row in cooling_df.iterrows():
                     progress = min((abs(min(0, row["Net_Transfers"])) / THRESHOLD) * 100, 100)

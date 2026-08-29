@@ -2,9 +2,22 @@ from data import get_manager_squad_ids
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from theme import fmt_num, render_list_card, section_header
+from theme import SILHOUETTE_BASE64, fmt_num, render_list_card, render_sortable_table, section_header
 
 pos_map = {"GKP": 1, "DEF": 2, "MID": 3, "FWD": 4}
+
+
+def get_player_img_url(photo, code=None):
+    photo_str = str(photo) if pd.notna(photo) else ""
+    if not photo_str or "Photo-Missing" in photo_str or photo_str == "None":
+        if pd.notna(code) and str(code).strip():
+            return f"https://resources.premierleague.com/premierleague/photos/players/110x140/p{int(code)}.png"
+        return SILHOUETTE_BASE64
+
+    base_name = photo_str.replace(".jpg", "").replace(".png", "")
+    if not base_name.startswith("p"):
+        base_name = f"p{base_name}"
+    return f"https://resources.premierleague.com/premierleague/photos/players/110x140/{base_name}.png"
 
 
 def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
@@ -23,7 +36,7 @@ def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
                 
                 * **Y-Axis (Rolling Sum xGI):** Total attacking threat accumulated across the selected match window.
                 * **X-Axis (Upcoming 5-GW FDR):** Total fixture difficulty rating over the next 5 games (lower score = easier schedule).
-                * **Min Matches Filter:** Filters out rotational cameos so you only evaluate nailed starters with meaningful sample sizes.
+                * **Min Matches Filter:** Filters out rotational cameos so you only evaluate regular starters.
                 """
             )
 
@@ -98,6 +111,7 @@ def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
         SELECT
             h.element_id,
             p.code,
+            p.photo,
             p.web_name AS Player,
             p.first_name || ' ' || p.second_name AS Full_Name,
             t.short_name AS Team,
@@ -151,6 +165,7 @@ def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
     SELECT
         element_id,
         code,
+        photo,
         Player,
         Full_Name,
         Team,
@@ -185,16 +200,10 @@ def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
             df_rolling["Team_ID"].map(teams_fdr_map).fillna(15).astype(int)
         )
 
-        df_rolling["Photo"] = df_rolling["code"].apply(
-            lambda c: f"https://resources.premierleague.com/premierleague/photos/players/110x140/p{c}.png"
-            if pd.notna(c)
-            else ""
-        )
-
         active_manager_id = st.session_state.get("manager_id", "").strip()
         if only_my_squad:
             if not active_manager_id:
-                st.info("💡 Enter your FPL Team ID in the sidebar to filter by your squad.")
+                st.info("💡 Enter your FPL Team ID in the top bar to filter by your squad.")
                 squad_ids = []
             else:
                 squad_ids = get_manager_squad_ids(active_manager_id, current_gw)
@@ -222,111 +231,197 @@ def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
 
     if df_rolling.empty:
         st.info("No players found matching the current rolling filter criteria.")
-    else:
-        if len(df_rolling) >= 2:
-            x_mid = float(df_rolling["Upcoming_FDR"].median())
-            y_mid = float(df_rolling["Rolling_Sum_xGI"].median())
+        return
 
-            fig = px.scatter(
-                df_rolling,
-                x="Upcoming_FDR",
-                y="Rolling_Sum_xGI",
-                color="Pos",
-                size="Price",
-                hover_name="Player",
-                hover_data={
-                    "Team": True,
-                    "Price": ":.1f",
-                    "Rolling_Sum_xGI": ":.2f",
-                    "Rolling_xGI_per_90": ":.2f",
-                    "Rolling_Avg_Pts": ":.2f",
-                    "Upcoming_FDR": True,
-                    "Rolling_Avg_Mins": ":.0f",
-                    "Rolling_Matches_Played": True,
-                    "Pos": False,
-                },
-                labels={
-                    "Upcoming_FDR": "Upcoming 5-GW Fixture Difficulty Rating (Lower = Easier)",
-                    "Rolling_Sum_xGI": f"Rolling {window_size}-Match xGI",
-                    "Pos": "Position",
-                },
-                title=f"Underlying Form vs Schedule (L{window_size} xGI vs Next 5 FDR)",
-                color_discrete_map={
-                    "GKP": "#f59e0b",
-                    "DEF": "#3b82f6",
-                    "MID": "#10b981",
-                    "FWD": "#ef4444",
-                },
-            )
+    if len(df_rolling) >= 2:
+        x_mid = float(df_rolling["Upcoming_FDR"].median())
+        y_mid = float(df_rolling["Rolling_Sum_xGI"].median())
 
-            fig.add_vline(x=x_mid, line_dash="dash", line_color="rgba(255, 255, 255, 0.25)")
-            fig.add_hline(y=y_mid, line_dash="dash", line_color="rgba(255, 255, 255, 0.25)")
-
-            fig.update_layout(
-                template="plotly_dark",
-                plot_bgcolor="rgba(15, 23, 42, 0.4)",
-                paper_bgcolor="rgba(15, 23, 42, 0.0)",
-                margin=dict(l=20, r=20, t=50, b=20),
-                height=450,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-        top_rolling = df_rolling.head(min(5, len(df_rolling)))
-        cols_r = st.columns(len(top_rolling))
-        for i, (_, row) in enumerate(top_rolling.iterrows()):
-            card_img = (
-                f"https://resources.premierleague.com/premierleague/photos/players/110x140/p{row['code']}.png"
-                if pd.notna(row.get("code"))
-                else None
-            )
-            with cols_r[i]:
-                render_list_card(
-                    f"{row['Player']} ({row['Team']})",
-                    [(row["Pos"], "blue"), (f"L{window_size} Form", "green")],
-                    f'<span>Price</span> £{fmt_num(row["Price"], ".1f")} · <span>xGI</span>'
-                    f' {fmt_num(row["Rolling_Sum_xGI"])} · <span>xGI/90</span>'
-                    f' {fmt_num(row["Rolling_xGI_per_90"])} · <span>Next 5 FDR</span>'
-                    f' {int(row["Upcoming_FDR"])} · <span>Avg Pts</span>'
-                    f' {fmt_num(row["Rolling_Avg_Pts"], ".1f")}',
-                    img_url=card_img,
-                )
-
-        display_cols_tab2 = [
-            "Photo",
-            "Player",
-            "Team",
-            "Pos",
-            "Price",
-            "Latest_GW",
-            "Rolling_Sum_xGI",
-            "Rolling_xGI_per_90",
-            "Rolling_Avg_Pts",
-            "Upcoming_FDR",
-            "Rolling_Avg_Mins",
-            "Rolling_Matches_Played",
-        ]
-
-        display_df_rolling = df_rolling[display_cols_tab2].head(35)
-        # Exact row-height sizing (35px per row + 35px header + 3px border padding)
-        table_height_rolling = (len(display_df_rolling) + 1) * 35 + 3
-
-        st.dataframe(
-            display_df_rolling,
-            hide_index=True,
-            width="stretch",
-            height=table_height_rolling,
-            column_config={
-                "Photo": st.column_config.ImageColumn("", width="small", help="Player Photo"),
-                "Player": st.column_config.TextColumn("Player"),
-                "Team": st.column_config.TextColumn("Club"),
-                "Pos": st.column_config.TextColumn("Pos"),
-                "Price": st.column_config.NumberColumn("Price", format="£%.1f"),
-                "Latest_GW": st.column_config.NumberColumn("GW", format="%d"),
-                "Rolling_Sum_xGI": st.column_config.NumberColumn(f"xGI (L{window_size})", format="%.2f"),
-                "Rolling_xGI_per_90": st.column_config.NumberColumn(f"xGI/90 (L{window_size})", format="%.2f"),
-                "Rolling_Avg_Pts": st.column_config.NumberColumn(f"Pts (L{window_size})", format="%.2f"),
-                "Upcoming_FDR": st.column_config.NumberColumn("Next 5 FDR", format="%d"),
-                "Rolling_Avg_Mins": st.column_config.NumberColumn(f"Mins (L{window_size})", format="%.1f"),
-                "Rolling_Matches_Played": st.column_config.NumberColumn("Apps", format="%d"),
+        fig = px.scatter(
+            df_rolling,
+            x="Upcoming_FDR",
+            y="Rolling_Sum_xGI",
+            color="Pos",
+            size="Price",
+            hover_name="Player",
+            hover_data={
+                "Team": True,
+                "Price": ":.1f",
+                "Rolling_Sum_xGI": ":.2f",
+                "Rolling_xGI_per_90": ":.2f",
+                "Rolling_Avg_Pts": ":.2f",
+                "Upcoming_FDR": True,
+                "Rolling_Avg_Mins": ":.0f",
+                "Rolling_Matches_Played": True,
+                "Pos": False,
+            },
+            labels={
+                "Upcoming_FDR": "Upcoming 5-GW Fixture Difficulty Rating (Lower = Easier)",
+                "Rolling_Sum_xGI": f"Rolling {window_size}-Match xGI",
+                "Pos": "Position",
+            },
+            title=f"Underlying Form vs Schedule (L{window_size} xGI vs Next 5 FDR)",
+            color_discrete_map={
+                "GKP": "#f59e0b",
+                "DEF": "#3b82f6",
+                "MID": "#10b981",
+                "FWD": "#ef4444",
             },
         )
+
+        fig.add_vline(x=x_mid, line_dash="dash", line_color="rgba(255, 255, 255, 0.25)")
+        fig.add_hline(y=y_mid, line_dash="dash", line_color="rgba(255, 255, 255, 0.25)")
+
+        fig.update_layout(
+            template="plotly_dark",
+            plot_bgcolor="rgba(15, 23, 42, 0.4)",
+            paper_bgcolor="rgba(15, 23, 42, 0.0)",
+            margin=dict(l=20, r=20, t=50, b=20),
+            height=450,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    top_rolling = df_rolling.head(min(5, len(df_rolling)))
+    cols_r = st.columns(len(top_rolling))
+    for i, (_, row) in enumerate(top_rolling.iterrows()):
+        card_img = get_player_img_url(row.get("photo"), row.get("code"))
+        with cols_r[i]:
+            render_list_card(
+                f"{row['Player']} ({row['Team']})",
+                [(row["Pos"], "blue"), (f"L{window_size} Form", "green")],
+                f'<span>Price</span> £{fmt_num(row["Price"], ".1f")} · <span>xGI</span>'
+                f' {fmt_num(row["Rolling_Sum_xGI"])} · <span>xGI/90</span>'
+                f' {fmt_num(row["Rolling_xGI_per_90"])} · <span>Next 5 FDR</span>'
+                f' {int(row["Upcoming_FDR"])} · <span>Avg Pts</span>'
+                f' {fmt_num(row["Rolling_Avg_Pts"], ".1f")}',
+                img_url=card_img,
+            )
+
+    is_dark = st.session_state.get("theme_mode", "dark") == "dark"
+
+    theme_styles = f"""
+    <style>
+    .unified-table-wrapper {{
+        width: 100%;
+        overflow-x: auto;
+        border: 1px solid {"#222222" if is_dark else "#e2e8f0"};
+        border-radius: 10px;
+        background: {"#141414" if is_dark else "#ffffff"};
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        margin-top: 1rem;
+    }}
+    .unified-table {{
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'Inter', sans-serif;
+        font-size: 0.85rem;
+        color: {"#ffffff" if is_dark else "#0f172a"};
+    }}
+    .unified-table th {{
+        background: {"#18181b" if is_dark else "#f8fafc"};
+        color: {"#94a3b8" if is_dark else "#64748b"};
+        font-family: 'Outfit', sans-serif;
+        font-weight: 600;
+        font-size: 0.78rem;
+        letter-spacing: 0.02em;
+        padding: 0.7rem 0.75rem;
+        border-bottom: 1px solid {"#27272a" if is_dark else "#e2e8f0"};
+        text-align: center;
+        white-space: nowrap;
+    }}
+    .unified-table td {{
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid {"#1f1f23" if is_dark else "#f1f5f9"};
+        vertical-align: middle;
+        text-align: center;
+        white-space: nowrap;
+    }}
+    .unified-table tr:last-child td {{
+        border-bottom: none;
+    }}
+    .unified-table tr:hover td {{
+        background: {"rgba(255, 255, 255, 0.02)" if is_dark else "rgba(0, 0, 0, 0.015)"};
+    }}
+    .player-unified-cell {{
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        white-space: nowrap;
+    }}
+    .player-avatar-circle {{
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        object-fit: cover;
+        object-position: top center;
+        background-color: {"#1e293b" if is_dark else "#e2e8f0"};
+        border: 1px solid {"#2a2a2a" if is_dark else "#cbd5e1"};
+        flex-shrink: 0;
+    }}
+    .player-name-text {{
+        font-weight: 600;
+        color: {"#ffffff" if is_dark else "#0f172a"};
+    }}
+    .pos-pill {{
+        display: inline-block;
+        padding: 0.12rem 0.45rem;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        font-weight: 700;
+    }}
+    .pos-GKP {{ background: rgba(245, 158, 11, 0.18); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); }}
+    .pos-DEF {{ background: rgba(59, 130, 246, 0.18); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }}
+    .pos-MID {{ background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }}
+    .pos-FWD {{ background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }}
+
+    .fdr-pill {{
+        display: inline-block;
+        padding: 0.15rem 0.55rem;
+        border-radius: 4px;
+        font-weight: 800;
+        font-size: 0.82rem;
+    }}
+    .fdr-green {{ background: rgba(34, 197, 94, 0.2); color: {"#4ade80" if is_dark else "#15803d"}; }}
+    .fdr-yellow {{ background: rgba(234, 179, 8, 0.2); color: {"#facc15" if is_dark else "#a16207"}; }}
+    .fdr-red {{ background: rgba(239, 68, 68, 0.2); color: {"#f87171" if is_dark else "#b91c1c"}; }}
+    </style>
+    """
+
+    display_df = df_rolling.head(35)
+    html_out = [theme_styles, '<div class="unified-table-wrapper"><table class="unified-table"><thead><tr>']
+    html_out.append('<th style="text-align: left; padding-left: 1rem;">Player</th>')
+    html_out.append('<th>Club</th><th>Pos</th><th>Price</th><th>GW</th>')
+    html_out.append(f'<th>xGI (L{window_size})</th><th>xGI/90 (L{window_size})</th><th>Pts (L{window_size})</th>')
+    html_out.append(f'<th>Next 5 FDR</th><th>Mins (L{window_size})</th><th>Apps</th>')
+    html_out.append('</tr></thead><tbody>')
+
+    for _, row in display_df.iterrows():
+        p_img = get_player_img_url(row.get("photo"), row.get("code"))
+        fdr_val = int(row["Upcoming_FDR"])
+        fdr_cls = "fdr-green" if fdr_val <= 11 else ("fdr-yellow" if fdr_val <= 14 else "fdr-red")
+
+        html_out.append("<tr>")
+        html_out.append(
+            f'<td style="text-align: left; padding-left: 1rem;">'
+            f'<div class="player-unified-cell">'
+            f'<img src="{p_img}" class="player-avatar-circle" onerror="this.src=\'{SILHOUETTE_BASE64}\'">'
+            f'<span class="player-name-text">{row["Player"]}</span>'
+            f'</div></td>'
+        )
+        html_out.append(f'<td>{row["Team"]}</td>')
+        html_out.append(f'<td><span class="pos-pill pos-{row["Pos"]}">{row["Pos"]}</span></td>')
+        html_out.append(f'<td>£{row["Price"]:.1f}</td>')
+        html_out.append(f'<td>{int(row["Latest_GW"])}</td>')
+        html_out.append(f'<td style="font-weight: 700;">{row["Rolling_Sum_xGI"]:.2f}</td>')
+        html_out.append(f'<td>{row["Rolling_xGI_per_90"]:.2f}</td>')
+        html_out.append(f'<td style="font-weight: 700;">{row["Rolling_Avg_Pts"]:.2f}</td>')
+        html_out.append(f'<td><span class="fdr-pill {fdr_cls}">{fdr_val}</span></td>')
+        html_out.append(f'<td>{row["Rolling_Avg_Mins"]:.1f}</td>')
+        html_out.append(f'<td>{int(row["Rolling_Matches_Played"])}</td>')
+        html_out.append("</tr>")
+
+    html_out.append("</tbody></table></div>")
+
+    # Spans full length on main page without internal scrollbars
+    full_table_height = (len(display_df) * 45) + 60
+    render_sortable_table("".join(html_out), is_dark=is_dark, height=full_table_height)

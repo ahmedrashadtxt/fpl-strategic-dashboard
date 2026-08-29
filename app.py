@@ -21,11 +21,7 @@ from tabs import (
     render_squad_analyzer_tab,
     render_transfer_market_tab,
 )
-from theme import (
-    apply_theme,
-    render_sidebar_card,
-    render_top_bar,
-)
+from theme import apply_theme
 
 if get_script_run_ctx() is None:
     sys.exit(subprocess.call([sys.executable, "-m", "streamlit", "run", __file__]))
@@ -34,12 +30,15 @@ st.set_page_config(
     page_title="FPL Optimizer",
     page_icon="assets/fplo.png",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
-# ── Theme State & Root Injection ─────────────────────────────────────────────
+# ── Theme State ───────────────────────────────────────────────────────────────
 if "theme_mode" not in st.session_state:
     st.session_state["theme_mode"] = "dark"
+
+is_dark = st.session_state["theme_mode"] == "dark"
+apply_theme(is_dark=is_dark)
 
 # ── Google Analytics 4 ────────────────────────────────────────────────────────
 GA_MEASUREMENT_ID = st.secrets.get(
@@ -74,58 +73,45 @@ events_df, current_gw, gw_name = get_global_gameweek_info(conn)
 summary_df = get_summary_stats(conn)
 teams_fdr_map = get_teams_fdr_map(conn, current_gw)
 
-# ── Sidebar ──────────────────────────────────────────────────────────────────
-with st.sidebar:
-    # Dynamic live status badge
-    if "(Live)" in gw_name:
-        st.markdown(f'<span class="gw-badge live">● {gw_name.upper()}</span>', unsafe_allow_html=True)
-    else:
-        st.markdown(f'<span class="gw-badge">NEXT · {gw_name}</span>', unsafe_allow_html=True)
+# ── Header & Action Bar ───────────────────────────────────────────────────────
+col_brand, col_search, col_theme = st.columns([5.4, 2.1, 0.5], vertical_alignment="center")
 
-    st.markdown("<br>", unsafe_allow_html=True)
+with col_brand:
+    badge_html = (
+        f'<span class="gw-badge live">● {gw_name.upper()}</span>'
+        if "(Live)" in gw_name
+        else f'<span class="gw-badge">NEXT · {gw_name}</span>'
+    )
+    st.markdown(
+        f"""
+        <div class="top-nav-brand">
+            <span class="top-nav-title">FPL Optimizer</span>
+            {badge_html}
+        </div>
+        <div class="top-nav-sub">Strategic analytics & squad optimizer</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    # ☀️ / 🌙 Theme Toggle
-    is_light_mode = st.toggle("☀️ Light Mode", value=(st.session_state["theme_mode"] == "light"), key="theme_toggle_switch")
-    st.session_state["theme_mode"] = "light" if is_light_mode else "dark"
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
+with col_search:
     manager_id = st.text_input(
         "FPL Team ID",
         value=st.session_state.get("manager_id", ""),
-        placeholder="e.g. 1234567",
+        placeholder="Search Team ID...",
         key="global_manager_id",
+        label_visibility="collapsed",
     )
     if manager_id:
         st.session_state["manager_id"] = manager_id
 
-    st.markdown("<br>", unsafe_allow_html=True)
+with col_theme:
+    st.markdown('<span class="theme-toggle-marker"></span>', unsafe_allow_html=True)
+    theme_icon = "🌞" if is_dark else "🌙"
+    if st.button(theme_icon, key="theme_toggle_btn", help="Toggle Theme"):
+        st.session_state["theme_mode"] = "light" if is_dark else "dark"
+        st.rerun()
 
-    render_sidebar_card(
-        "Season Overview",
-        [
-            ("Gameweek", gw_name),
-            ("Players Tracked", f"{int(summary_df['total'].values[0]):,}"),
-            ("Buy Signals", f"{int(summary_df['buy_signals'].values[0]):,}"),
-            ("Sell Signals", f"{int(summary_df['sell_signals'].values[0]):,}"),
-        ],
-    )
-
-    render_sidebar_card(
-        "Transfer Market",
-        [
-            ("Heating Up", f"{int(summary_df['heating'].values[0]):,}"),
-            ("Cooling Down", f"{int(summary_df['cooling'].values[0]):,}"),
-        ],
-    )
-
-# ── Inject Root Level Theme CSS ───────────────────────────────────────────────
-apply_theme(is_dark=(st.session_state["theme_mode"] == "dark"))
-
-# ── Header Bar ────────────────────────────────────────────────────────────────
-render_top_bar(f"Strategic analytics & squad optimizer · {gw_name}")
-
-# ── Main Tabs ─────────────────────────────────────────────────────────────────
+# ── Main Sticky Tabs ──────────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     [
         "Squad Analyzer",

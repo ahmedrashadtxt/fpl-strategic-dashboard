@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 from data import get_manager_squad_ids
-from theme import section_header
+from theme import render_sortable_table, section_header
 
 
 def render_fixture_ticker_tab(conn, current_gw):
@@ -76,18 +76,24 @@ def render_fixture_ticker_tab(conn, current_gw):
     team_code_map = dict(zip(teams_df["short_name"], teams_df["code"]))
     
     target_team_short_names = set(teams_list)
+    team_players_map = {}
 
     if only_my_squad_tab3:
         active_manager_id_tab3 = st.session_state.get("manager_id", "").strip()
         if not active_manager_id_tab3:
-            st.info("💡 Enter your FPL Team ID in the sidebar to filter by your squad.")
+            st.info("💡 Enter your FPL Team ID in the top bar to filter by your squad.")
             target_team_short_names = set()
         else:
             squad_ids_tab3 = get_manager_squad_ids(active_manager_id_tab3, current_gw)
-            squad_teams = pt_lookup[pt_lookup["element_id"].isin(squad_ids_tab3)][
-                "short_name"
-            ].unique()
+            squad_players_df = pt_lookup[pt_lookup["element_id"].isin(squad_ids_tab3)]
+            squad_teams = squad_players_df["short_name"].unique()
             target_team_short_names = target_team_short_names.intersection(set(squad_teams))
+            
+            team_players_map = (
+                squad_players_df.groupby("short_name")["web_name"]
+                .apply(lambda names: ", ".join(names))
+                .to_dict()
+            )
 
     if search_query3.strip():
         q3 = search_query3.strip().lower()
@@ -100,16 +106,22 @@ def render_fixture_ticker_tab(conn, current_gw):
         target_team_short_names = target_team_short_names.intersection(set(matching_from_lookup))
 
     ticker_data = []
-    gw_cols = [f"GW {gw}" for gw in range(current_gw, current_gw + 5)]
+    gw_cols = [gw for gw in range(current_gw, current_gw + 5)]
 
     for team in teams_list:
         t_code = team_code_map.get(team, 0)
         row = {
-            "Badge": f"https://resources.premierleague.com/premierleague/badges/50/t{t_code}.png",
-            "Team": team,
+            "code": t_code,
+            "short_name": team,
+            "full_name": team_name_map.get(team, team),
+            "fixtures": {},
         }
+        
+        if only_my_squad_tab3:
+            row["my_players"] = team_players_map.get(team, "—")
+
         total_difficulty = 0
-        for gw in range(current_gw, current_gw + 5):
+        for gw in gw_cols:
             match = fixtures_df[
                 (fixtures_df["GW"] == gw)
                 & (
@@ -125,67 +137,161 @@ def render_fixture_ticker_tab(conn, current_gw):
                 else:
                     opp = f"{m['Home_Team']} (A)"
                     diff = m["Away_Diff"]
-                row[f"GW {gw}"] = f"[{diff}] {opp}"
+                row["fixtures"][gw] = (diff, f"[{diff}] {opp}")
                 total_difficulty += diff
             else:
-                row[f"GW {gw}"] = "[5] Blank"
+                row["fixtures"][gw] = (5, "[5] Blank")
                 total_difficulty += 5
-        row["Difficulty Rating"] = total_difficulty
+        row["difficulty_rating"] = total_difficulty
         ticker_data.append(row)
 
-    ticker_df = pd.DataFrame(ticker_data).sort_values(
-        by="Difficulty Rating", ascending=True
-    )
-    ticker_df = ticker_df[ticker_df["Team"].isin(target_team_short_names)]
+    ticker_data = [r for r in ticker_data if r["short_name"] in target_team_short_names]
+    ticker_data.sort(key=lambda x: x["difficulty_rating"])
 
-    if ticker_df.empty:
+    if not ticker_data:
         st.info("No clubs found matching your search or squad criteria.")
-    else:
-        ticker_df = ticker_df.dropna(subset=["Team"])
-        ticker_df = ticker_df[ticker_df["Team"].astype(str).str.strip() != ""]
+        return
 
-        ticker_df["Team"] = ticker_df["Team"].apply(lambda x: f"{team_name_map.get(x, x)} ({x})")
+    is_dark = st.session_state.get("theme_mode", "dark") == "dark"
 
-        def style_fdr_cell(val):
-            val_str = str(val)
-            if "Blank" in val_str:
-                return "background-color: rgba(15, 23, 42, 0.5); color: #64748b; font-style: italic; text-align: center;"
-            elif "[2]" in val_str:
-                return "background-color: rgba(34, 197, 94, 0.25); color: #4ade80; font-weight: 600; text-align: center;"
-            elif "[3]" in val_str:
-                return "background-color: rgba(100, 116, 139, 0.15); color: #cbd5e1; text-align: center;"
-            elif "[4]" in val_str:
-                return "background-color: rgba(249, 115, 22, 0.25); color: #fb923c; font-weight: 600; text-align: center;"
-            elif "[5]" in val_str:
-                return "background-color: rgba(239, 68, 68, 0.3); color: #f87171; font-weight: 700; text-align: center;"
-            return "text-align: center;"
+    theme_styles = f"""
+    <style>
+    .fdr-table-wrapper {{
+        width: 100%;
+        overflow-x: auto;
+        border: 1px solid {"#222222" if is_dark else "#e2e8f0"};
+        border-radius: 10px;
+        background: {"#141414" if is_dark else "#ffffff"};
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        margin-top: 0.5rem;
+    }}
+    .fdr-table {{
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'Inter', sans-serif;
+        font-size: 0.86rem;
+        color: {"#ffffff" if is_dark else "#0f172a"};
+    }}
+    .fdr-table th {{
+        background: {"#18181b" if is_dark else "#f8fafc"};
+        color: {"#94a3b8" if is_dark else "#64748b"};
+        font-family: 'Outfit', sans-serif;
+        font-weight: 600;
+        font-size: 0.8rem;
+        letter-spacing: 0.02em;
+        padding: 0.75rem 0.9rem;
+        border-bottom: 1px solid {"#27272a" if is_dark else "#e2e8f0"};
+        text-align: center;
+        white-space: nowrap;
+    }}
+    .fdr-table td {{
+        padding: 0.55rem 0.75rem;
+        border-bottom: 1px solid {"#1f1f23" if is_dark else "#f1f5f9"};
+        vertical-align: middle;
+    }}
+    .fdr-table tr:last-child td {{
+        border-bottom: none;
+    }}
+    .fdr-table tr:hover td {{
+        background: {"rgba(255, 255, 255, 0.02)" if is_dark else "rgba(0, 0, 0, 0.015)"};
+    }}
+    .club-unified-cell {{
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        white-space: nowrap;
+    }}
+    .club-crest-img {{
+        width: 24px;
+        height: 24px;
+        object-fit: contain;
+        flex-shrink: 0;
+    }}
+    .club-title-text {{
+        font-weight: 600;
+        color: {"#ffffff" if is_dark else "#0f172a"};
+    }}
+    .my-players-pill {{
+        color: {"#9BBEED" if is_dark else "#1d4ed8"};
+        font-weight: 600;
+        font-size: 0.83rem;
+        white-space: nowrap;
+    }}
+    .fdr-badge {{
+        display: block;
+        width: 100%;
+        text-align: center;
+        padding: 0.35rem 0.55rem;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        white-space: nowrap;
+    }}
+    .fdr-2 {{ background: rgba(34, 197, 94, 0.22); color: {"#4ade80" if is_dark else "#15803d"}; }}
+    .fdr-3 {{ background: rgba(100, 116, 139, 0.16); color: {"#cbd5e1" if is_dark else "#334155"}; }}
+    .fdr-4 {{ background: rgba(249, 115, 22, 0.24); color: {"#fb923c" if is_dark else "#c2410c"}; font-weight: 700; }}
+    .fdr-5 {{ background: rgba(239, 68, 68, 0.28); color: {"#f87171" if is_dark else "#b91c1c"}; font-weight: 800; }}
+    .fdr-blank {{ background: rgba(15, 23, 42, 0.5); color: #64748b; font-style: italic; }}
 
-        def style_rating_col(val):
-            try:
-                v = int(val)
-                if v <= 11:
-                    return "background-color: rgba(34, 197, 94, 0.25); color: #22c55e; font-weight: bold; text-align: center;"
-                elif v <= 14:
-                    return "background-color: rgba(234, 179, 8, 0.2); color: #eab308; font-weight: bold; text-align: center;"
-                else:
-                    return "background-color: rgba(239, 68, 68, 0.25); color: #ef4444; font-weight: bold; text-align: center;"
-            except Exception:
-                return ""
+    .fdr-total-cell {{
+        text-align: center;
+        font-weight: 800;
+        font-size: 0.9rem;
+    }}
+    .total-green {{ color: #22c55e; }}
+    .total-yellow {{ color: #eab308; }}
+    .total-red {{ color: #ef4444; }}
+    </style>
+    """
 
-        styled_ticker = ticker_df.style.map(
-            style_fdr_cell, subset=gw_cols
-        ).map(style_rating_col, subset=["Difficulty Rating"])
+    html_out = [theme_styles, '<div class="fdr-table-wrapper"><table class="fdr-table"><thead><tr>']
+    html_out.append('<th style="text-align: left; padding-left: 1rem;">Club</th>')
+    
+    if only_my_squad_tab3:
+        html_out.append('<th style="text-align: left;">My Players</th>')
+        
+    for gw in gw_cols:
+        html_out.append(f'<th>GW {gw}</th>')
+        
+    html_out.append('<th>Total FDR (5 GW)</th></tr></thead><tbody>')
 
-        table_height_ticker = (len(ticker_df) + 1) * 35 + 3
+    for row in ticker_data:
+        crest_url = f"https://resources.premierleague.com/premierleague/badges/50/t{row['code']}.png"
+        club_label = f"{row['full_name']} ({row['short_name']})"
 
-        st.dataframe(
-            styled_ticker,
-            hide_index=True,
-            width="stretch",
-            height=table_height_ticker,
-            column_config={
-                "Badge": st.column_config.ImageColumn(" ", width="small", help="Club Crest"),
-                "Team": st.column_config.TextColumn("Club"),
-                "Difficulty Rating": st.column_config.NumberColumn("Total FDR (5 GW)"),
-            },
+        html_out.append("<tr>")
+        html_out.append(
+            f'<td style="padding-left: 1rem;">'
+            f'<div class="club-unified-cell">'
+            f'<img src="{crest_url}" class="club-crest-img" alt="{row["short_name"]}">'
+            f'<span class="club-title-text">{club_label}</span>'
+            f'</div></td>'
         )
+
+        if only_my_squad_tab3:
+            html_out.append(f'<td style="text-align: left;"><span class="my-players-pill">{row.get("my_players", "—")}</span></td>')
+
+        for gw in gw_cols:
+            diff, label = row["fixtures"][gw]
+            if "Blank" in label:
+                cls = "fdr-blank"
+            elif diff == 2:
+                cls = "fdr-2"
+            elif diff == 3:
+                cls = "fdr-3"
+            elif diff == 4:
+                cls = "fdr-4"
+            else:
+                cls = "fdr-5"
+            html_out.append(f'<td><span class="fdr-badge {cls}">{label}</span></td>')
+
+        tot = row["difficulty_rating"]
+        tot_cls = "total-green" if tot <= 11 else ("total-yellow" if tot <= 14 else "total-red")
+        html_out.append(f'<td class="fdr-total-cell {tot_cls}">{tot}</td>')
+        html_out.append("</tr>")
+
+    html_out.append("</tbody></table></div>")
+
+    # Spans full length on main page without internal scrollbars
+    full_table_height = (len(ticker_data) * 45) + 60
+    render_sortable_table("".join(html_out), is_dark=is_dark, height=full_table_height)
