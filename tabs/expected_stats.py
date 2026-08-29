@@ -6,6 +6,19 @@ from theme import fmt_num, render_list_card, section_header
 pos_map = {"GKP": 1, "DEF": 2, "MID": 3, "FWD": 4}
 
 
+def get_player_img_url(photo, code=None):
+    photo_str = str(photo) if pd.notna(photo) else ""
+    if not photo_str or "Photo-Missing" in photo_str or photo_str == "None":
+        if pd.notna(code) and str(code).strip():
+            return f"https://resources.premierleague.com/premierleague/photos/players/110x140/p{int(code)}.png"
+        return "https://resources.premierleague.com/premierleague/photos/players/110x140/Photo-Missing.png"
+
+    base_name = photo_str.replace(".jpg", "").replace(".png", "")
+    if not base_name.startswith("p"):
+        base_name = f"p{base_name}"
+    return f"https://resources.premierleague.com/premierleague/photos/players/110x140/{base_name}.png"
+
+
 def render_expected_stats_tab(conn, current_gw):
     col_t1_hdr, col_t1_pop = st.columns([6, 1])
     with col_t1_hdr:
@@ -22,7 +35,7 @@ def render_expected_stats_tab(conn, current_gw):
                 
                 * **xG / xA / xGI:** Expected Goals, Assists, and Goal Involvements based on shot location and chance quality.
                 * **ΔxG (xG Delta):** Calculated as `xG - Actual Goals`.
-                    * 🟢 **Buy Signal (ΔxG ≥ +0.5):** Creating/receiving high-quality chances but unlucky with finishing. Positive scoring regression expected.
+                    * 🟢 **Buy Signal (ΔxG ≥ +0.5):** Creating/receiving high-quality chances but unlucky with finishing.
                     * 🔴 **Sell Signal (ΔxG ≤ -0.5):** Outperforming underlying metrics significantly. Current scoring conversion is historically unsustainable.
                 * **xGI / 90:** Current season chance involvement per 90 minutes played.
                 * **Career GI / 90:** Multi-season historical actual `(Goals + Assists) / Minutes * 90` baseline from prior Premier League campaigns.
@@ -75,7 +88,6 @@ def render_expected_stats_tab(conn, current_gw):
         else ""
     )
 
-    # Check if historical table exists in fpl.db
     table_check = pd.read_sql(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='player_past_seasons'",
         conn,
@@ -107,6 +119,8 @@ def render_expected_stats_tab(conn, current_gw):
     query = f"""
     SELECT
         p.id AS element_id,
+        p.code,
+        p.photo,
         p.web_name AS Player,
         p.first_name || ' ' || p.second_name AS Full_Name,
         t.short_name AS Team,
@@ -157,6 +171,14 @@ def render_expected_stats_tab(conn, current_gw):
         if col_name in df_xgi.columns:
             df_xgi[col_name] = pd.to_numeric(df_xgi[col_name], errors="coerce")
 
+    # Clean any invalid rows
+    df_xgi = df_xgi.dropna(subset=["Player"])
+    df_xgi = df_xgi[df_xgi["Player"].astype(str).str.strip() != ""]
+
+    df_xgi["Photo"] = [
+        get_player_img_url(ph, c) for ph, c in zip(df_xgi["photo"], df_xgi["code"])
+    ]
+
     active_manager_id_tab1 = st.session_state.get("manager_id", "").strip()
     if only_my_squad_tab1:
         if not active_manager_id_tab1:
@@ -192,7 +214,7 @@ def render_expected_stats_tab(conn, current_gw):
     if df_xgi.empty:
         st.info(f"No players found matching '{search_query}'. Try adjusting your filters.")
     else:
-        top_cards = df_xgi.head(min(5, len(df_xgi)))
+        top_cards = df_xgi.head(min(4, len(df_xgi)))
         card_cols = st.columns(len(top_cards))
         for i, (_, row) in enumerate(top_cards.iterrows()):
             delta = float(row["xG_Delta"])
@@ -208,6 +230,7 @@ def render_expected_stats_tab(conn, current_gw):
                     if pd.notna(row.get("Career_GI_90")) and show_career_baseline
                     else ""
                 )
+                card_img = get_player_img_url(row.get("photo"), row.get("code"))
                 render_list_card(
                     f"{row['Player']} ({row['Team']})",
                     [(row["Pos"], "blue"), signal_tag],
@@ -215,6 +238,7 @@ def render_expected_stats_tab(conn, current_gw):
                     f' {fmt_num(row["xGI"])} · <span>Pts</span>'
                     f' {int(float(row["Total_Points"]))} · <span>ΔxG</span>'
                     f' {fmt_num(delta, "+.2f")}{hist_note}',
+                    img_url=card_img,
                 )
 
         def highlight_xg_delta(val):
@@ -230,8 +254,8 @@ def render_expected_stats_tab(conn, current_gw):
                 pass
             return ""
 
-        # Dynamically include career baseline metrics if toggled
         display_cols_tab1 = [
+            "Photo",
             "Player",
             "Team",
             "Pos",
@@ -253,28 +277,35 @@ def render_expected_stats_tab(conn, current_gw):
             display_cols_tab1.extend(["Career_GI_90", "Career_Pts_90", "Career_Mins"])
 
         col_config = {
-            "Price": st.column_config.NumberColumn(format="£%.1f"),
-            "Minutes": st.column_config.NumberColumn("Mins"),
-            "Total_Points": st.column_config.NumberColumn("Pts"),
-            "Goals": st.column_config.NumberColumn("G"),
-            "Assists": st.column_config.NumberColumn("A"),
-            "Clean_Sheets": st.column_config.NumberColumn("CS"),
-            "Saves": st.column_config.NumberColumn("Saves"),
-            "xG": st.column_config.NumberColumn(format="%.2f"),
-            "xA": st.column_config.NumberColumn(format="%.2f"),
-            "xGI": st.column_config.NumberColumn(format="%.2f"),
-            "xG_Delta": st.column_config.NumberColumn(format="%.2f"),
+            "Photo": st.column_config.ImageColumn("", width="small", help="Player Photo"),
+            "Player": st.column_config.TextColumn("Player"),
+            "Team": st.column_config.TextColumn("Club"),
+            "Pos": st.column_config.TextColumn("Pos"),
+            "Price": st.column_config.NumberColumn("Price", format="£%.1f"),
+            "Minutes": st.column_config.NumberColumn("Mins", format="%d"),
+            "Total_Points": st.column_config.NumberColumn("Pts", format="%d"),
+            "Goals": st.column_config.NumberColumn("Gls", format="%d"),
+            "Assists": st.column_config.NumberColumn("Ast", format="%d"),
+            "Clean_Sheets": st.column_config.NumberColumn("CS", format="%d"),
+            "Saves": st.column_config.NumberColumn("Saves", format="%d"),
+            "xG": st.column_config.NumberColumn("xG", format="%.2f"),
+            "xA": st.column_config.NumberColumn("xA", format="%.2f"),
+            "xGI": st.column_config.NumberColumn("xGI", format="%.2f"),
+            "xG_Delta": st.column_config.NumberColumn("ΔxG", format="%.2f"),
             "xGI_per_90": st.column_config.NumberColumn("xGI/90", format="%.2f"),
             "Career_GI_90": st.column_config.NumberColumn("Career GI/90", format="%.2f", help="Career actual (Goals+Assists)/90 from previous Premier League seasons"),
             "Career_Pts_90": st.column_config.NumberColumn("Career Pts/90", format="%.2f", help="Career FPL Points per 90 from previous seasons"),
             "Career_Mins": st.column_config.NumberColumn("Career Mins", format="%d", help="Total minutes played in previous Premier League seasons"),
         }
 
+        display_df = df_xgi[display_cols_tab1].head(35)
+        # Exact row-height sizing (35px per row + 35px header + 3px border padding)
+        table_height = (len(display_df) + 1) * 35 + 3
+
         st.dataframe(
-            df_xgi[display_cols_tab1]
-            .head(30)
-            .style.map(highlight_xg_delta, subset=["xG_Delta"]),
+            display_df.style.map(highlight_xg_delta, subset=["xG_Delta"]),
             hide_index=True,
             width="stretch",
+            height=table_height,
             column_config=col_config,
         )

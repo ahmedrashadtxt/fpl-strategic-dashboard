@@ -45,18 +45,35 @@ def ensure_database_ready():
 
 
 def get_global_gameweek_info(conn):
-    """Fetches current and next gameweek metadata."""
+    """
+    Fetches current, ongoing, and next gameweek metadata.
+    If matches are active/ongoing, returns the live gameweek label.
+    """
     events_df = pd.read_sql(
         "SELECT id, name, is_current, is_next, finished FROM events", conn
     )
-    next_gw_row = events_df[events_df["is_next"] == 1]
-    current_gw = int(next_gw_row["id"].values[0]) if not next_gw_row.empty else 1
-    gw_name = (
-        next_gw_row["name"].values[0]
-        if not next_gw_row.empty
-        else f"Gameweek {current_gw}"
+    finished_ids = (
+        events_df[events_df["finished"] == 1]["id"].tolist()
+        if "finished" in events_df.columns
+        else []
     )
-    return events_df, current_gw, gw_name
+    next_gw_row = events_df[events_df["is_next"] == 1]
+    next_gw = int(next_gw_row["id"].values[0]) if not next_gw_row.empty else 1
+
+    # Ongoing gameweek: deadline has passed (id < next_gw) but matches are not finished
+    ongoing_rows = events_df[
+        (~events_df["id"].isin(finished_ids)) & (events_df["id"] < next_gw)
+    ]
+
+    if not ongoing_rows.empty:
+        ongoing_id = int(ongoing_rows.iloc[0]["id"])
+        gw_name = f"Gameweek {ongoing_id} (Live)"
+    elif not next_gw_row.empty:
+        gw_name = next_gw_row["name"].values[0]
+    else:
+        gw_name = f"Gameweek {next_gw}"
+
+    return events_df, next_gw, gw_name
 
 
 def get_summary_stats(conn):

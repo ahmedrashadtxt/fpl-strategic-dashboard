@@ -1,6 +1,15 @@
 import html
 import streamlit as st
 
+# Clean circular silhouette SVG encoded in Base64 (immune to 404s & sanitization)[cite: 14]
+SILHOUETTE_BASE64 = (
+    "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmci"
+    "IHZpZXdCb3g9IjAgMCA0NCA0NCIgZmlsbD0ibm9uZSI+PHJlY3Qgd2lkdGg9IjQ0IiBoZWlnaHQ9"
+    "IjQ0IiByeD0iMjIiIGZpbGw9IiMxZTI5M2IiLz48Y2lyY2xlIGN4PSIyMiIgY3k9IjE2IiByPSI3"
+    "LjUiIGZpbGw9IiM2NDc0OGIiLz48cGF0aCBkPSJNOSAzOWMwLTcuMTggNS44Mi0xMyAxMy0xM3Mx"
+    "MyA1LjgyIDEzIDEzIiBmaWxsPSIjNjQ3NDhiIi8+PC9zdmc+"
+)
+
 
 def get_theme_css(is_dark: bool = True) -> str:
     if is_dark:
@@ -25,12 +34,11 @@ def get_theme_css(is_dark: bool = True) -> str:
         df_filter = "none"
         toggle_track_off = "#334155"
         toggle_border_off = "#475569"
-        
-        # High contrast pastel tag text for Dark Mode
+
         tag_blue_txt = "#9BBEED"
-        tag_green_txt = "#4ade80" 
-        tag_red_txt = "#f87171" 
-        tag_yellow_txt = "#facc15" 
+        tag_green_txt = "#4ade80"
+        tag_red_txt = "#f87171"
+        tag_yellow_txt = "#facc15"
     else:
         bg_app = "#f8fafc"
         bg_card = "#ffffff"
@@ -53,8 +61,7 @@ def get_theme_css(is_dark: bool = True) -> str:
         df_filter = "invert(0.92) hue-rotate(180deg) brightness(1.02)"
         toggle_track_off = "#cbd5e1"
         toggle_border_off = "#94a3b8"
-        
-        # Deep contrast tag text for Light Mode
+
         tag_blue_txt = "#1e40af"
         tag_green_txt = "#15803d"
         tag_red_txt = "#b91c1c"
@@ -62,7 +69,6 @@ def get_theme_css(is_dark: bool = True) -> str:
 
     return f"""
 <style>
-/* Modern Font Upgrades (Outfit for headings, Inter for FPL-style data tables) */
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap');
 
 html, body, [class*="css"] {{
@@ -88,7 +94,6 @@ header[data-testid="stHeader"] {{
     z-index: 100 !important;
 }}
 
-/* Sidebar Base Styling */
 .stApp [data-testid="stSidebarCollapsedControl"] {{
     display: flex !important;
     visibility: visible !important;
@@ -146,7 +151,6 @@ header[data-testid="stHeader"] {{
 .sidebar-stat .label {{ color: {text_sub}; font-weight: 500; }}
 .sidebar-stat .value {{ color: {text_main}; font-weight: 700; }}
 
-/* ── OVERHAULED TOP BAR ── */
 .top-bar {{
     display: flex;
     align-items: center;
@@ -178,7 +182,6 @@ header[data-testid="stHeader"] {{
     margin-top: 6px;
 }}
 
-/* ── COMPACT & MODERN SECTION HEADER ── */
 .section-card {{
     background: transparent !important;
     border: none !important;
@@ -204,28 +207,52 @@ header[data-testid="stHeader"] {{
     margin: 0 !important;
 }}
 
+/* ── LIST CARDS & FAIL-SAFE AVATARS ── */
 .list-card {{
     background: {bg_list_card};
     border: 1px solid {border_color};
     border-radius: 10px;
-    padding: 1rem 1.15rem;
+    padding: 0.85rem 1rem;
     margin-bottom: 0.5rem;
     box-shadow: 0 1px 2px rgba(0,0,0,0.02);
 }}
 
+.list-card-content {{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}}
+
+.list-card-body {{
+    flex: 1;
+    min-width: 0;
+}}
+
+.card-avatar {{
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+    border-radius: 50% !important;
+    background-size: cover, cover !important;
+    background-position: top center, center !important;
+    background-repeat: no-repeat, no-repeat !important;
+    border: 1.5px solid {border_color} !important;
+    background-color: {tab_bar_bg} !important;
+    flex-shrink: 0 !important;
+}}
+
 .list-card-title {{
     font-family: 'Outfit', sans-serif;
-    font-size: 1.05rem;
+    font-size: 1.02rem;
     font-weight: 600;
     color: {text_main};
-    margin-bottom: 0.5rem;
 }}
 
 .list-card-tags {{
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem;
-    margin-bottom: 0.5rem;
 }}
 
 .tag {{
@@ -237,7 +264,6 @@ header[data-testid="stHeader"] {{
     letter-spacing: 0.02em;
 }}
 
-/* Dynamic High-Contrast Tag Colors */
 .tag-green {{ background: rgba(34, 197, 94, 0.15); color: {tag_green_txt}; border: 1px solid rgba(34, 197, 94, 0.3); }}
 .tag-red {{ background: rgba(239, 68, 68, 0.15); color: {tag_red_txt}; border: 1px solid rgba(239, 68, 68, 0.3); }}
 .tag-blue {{ background: rgba(155, 190, 237, 0.25); color: {tag_blue_txt}; border: 1px solid #9BBEED; }}
@@ -245,19 +271,45 @@ header[data-testid="stHeader"] {{
 .tag-gray {{ background: {tag_gray_bg}; color: {tag_gray_txt}; border: 1px solid {tag_gray_border}; }}
 
 .list-card-meta {{
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     color: {text_sub};
     line-height: 1.5;
 }}
 
 .list-card-meta span {{ color: {text_meta}; font-weight: 600; }}
 
-/* ── DISTINCT, SEPARATED TABS OVERHAUL ── */
+.progress-bar-wrap {{
+    height: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 2px;
+    margin-top: 8px;
+    overflow: hidden;
+}}
+
+.progress-bar-fill {{
+    height: 100%;
+    background-color: #22c55e;
+    border-radius: 2px;
+}}
+
+.progress-bar-fill.red {{
+    background-color: #ef4444;
+}}
+
+[data-testid="stDataFrame"] img {{
+    border-radius: 50% !important;
+    object-fit: cover !important;
+    object-position: top center !important;
+    width: 28px !important;
+    height: 28px !important;
+    border: 1px solid {border_color} !important;
+    background: {tab_bar_bg} !important;
+}}
+
 .stApp div[data-testid="stTabs"] {{
     background-color: transparent !important;
 }}
 
-/* Container has no background, just spacing */
 .stApp div[data-testid="stTabs"] [role="tablist"] {{
     gap: 12px !important;
     background-color: transparent !important;
@@ -265,7 +317,6 @@ header[data-testid="stHeader"] {{
     padding: 0.25rem 0 0.75rem 0 !important;
 }}
 
-/* Each tab is a distinct button */
 .stApp div[data-testid="stTabs"] button[role="tab"] {{
     background-color: {tab_bar_bg} !important;
     border: 1px solid {border_color} !important;
@@ -292,7 +343,6 @@ header[data-testid="stHeader"] {{
     opacity: 1 !important;
 }}
 
-/* Active Tab elevates and gets a distinct blue border */
 .stApp div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
     background-color: {tab_active_bg} !important;
     border: 1px solid #2563eb !important;
@@ -311,10 +361,41 @@ header[data-testid="stHeader"] {{
     opacity: 1 !important;
 }}
 
-/* Removes default Streamlit blue underline */
 .stApp div[data-testid="stTabs"] [data-baseweb="tab-highlight"],
 .stApp div[data-testid="stTabs"] [data-baseweb="tab-border"] {{
     display: none !important;
+}}
+
+/* ── INPUT FIELDS ── */
+.stApp div[data-baseweb="input"],
+.stApp div[data-baseweb="base-input"],
+.stApp .stTextInput > div > div {{
+    background-color: {input_bg} !important;
+    border: 1px solid {input_border} !important;
+    border-radius: 8px !important;
+}}
+
+.stApp div[data-baseweb="input"]:focus-within,
+.stApp .stTextInput > div > div:focus-within {{
+    border-color: #2563eb !important;
+    box-shadow: 0 0 0 1px #2563eb !important;
+}}
+
+.stApp .stTextInput input, 
+.stApp .stNumberInput input {{
+    background-color: transparent !important;
+    color: {text_main} !important;
+    border: none !important;
+    font-size: 0.9rem !important;
+    font-weight: 500 !important;
+}}
+
+.stApp ::placeholder,
+.stApp input::placeholder,
+.stApp textarea::placeholder,
+.stApp .stTextInput input::placeholder {{
+    color: {placeholder_color} !important;
+    opacity: 0.85 !important;
 }}
 
 /* ── BULLETPROOF SELECTBOX & DROPDOWNS ── */
@@ -350,7 +431,6 @@ header[data-testid="stHeader"] {{
     color: {text_main} !important;
 }}
 
-/* Dropdown Menu Overlay */
 .stApp div[data-baseweb="popover"],
 .stApp div[data-baseweb="popover"] > div,
 .stApp ul[data-baseweb="menu"],
@@ -375,7 +455,6 @@ header[data-testid="stHeader"] {{
     background: {tab_bar_bg} !important;
 }}
 
-/* ── BULLETPROOF TOGGLE SWITCH ── */
 .stApp div[data-testid="stToggle"] label {{
     cursor: pointer !important;
 }}
@@ -388,7 +467,6 @@ header[data-testid="stHeader"] {{
     font-size: 0.88rem !important;
 }}
 
-/* Toggle Track (Off State) */
 .stApp div[data-testid="stToggle"] label > div:first-of-type {{
     background-color: {toggle_track_off} !important;
     background: {toggle_track_off} !important;
@@ -396,14 +474,12 @@ header[data-testid="stHeader"] {{
     opacity: 1 !important;
 }}
 
-/* Toggle Track (On State) */
 .stApp div[data-testid="stToggle"] input:checked + div {{
     background-color: #2563eb !important;
     background: #2563eb !important;
     border-color: #2563eb !important;
 }}
 
-/* Toggle Thumb Handle */
 .stApp div[data-testid="stToggle"] label > div:first-of-type > div {{
     background-color: #ffffff !important;
     background: #ffffff !important;
@@ -411,7 +487,6 @@ header[data-testid="stHeader"] {{
     border: none !important;
 }}
 
-/* ── STRICT CHECKBOX FIX ── */
 .stApp div[data-testid="stCheckbox"] label > span:first-of-type,
 .stApp div[data-testid="stCheckbox"] [data-baseweb="checkbox"] > span:first-of-type {{
     background-color: {input_bg} !important;
@@ -437,7 +512,6 @@ header[data-testid="stHeader"] {{
     font-weight: 500 !important;
 }}
 
-/* ── SLIDERS ── */
 .stApp div[data-baseweb="slider"] div[role="slider"] {{
     background-color: #2563eb !important;
     border: 2px solid #ffffff !important;
@@ -453,7 +527,6 @@ header[data-testid="stHeader"] {{
     font-weight: 600 !important;
 }}
 
-/* ── BUTTONS ── */
 .stApp .stButton > button,
 .stApp .stButton > button[kind="primary"],
 .stApp .stButton > button[kind="secondary"] {{
@@ -473,7 +546,6 @@ header[data-testid="stHeader"] {{
     color: #ffffff !important;
 }}
 
-/* ── GUIDE POPOVER BUTTON ── */
 .stApp div[data-testid="stPopover"] > button,
 .stApp div[data-testid="stPopover"] button {{
     background-color: {bg_card} !important;
@@ -490,7 +562,6 @@ header[data-testid="stHeader"] {{
     font-weight: 600 !important;
 }}
 
-/* ── METRICS (Fixes Text / Number Truncation) ── */
 .stApp [data-testid="stMetric"] {{
     background: {bg_card} !important;
     border: 1px solid {border_color} !important;
@@ -520,7 +591,6 @@ header[data-testid="stHeader"] {{
     word-break: break-word !important;
 }}
 
-/* ── TABLES & DATAFRAMES ── */
 .stApp div[data-testid="stDataFrame"] {{
     border: 1px solid {border_color} !important;
     border-radius: 10px !important;
@@ -532,38 +602,6 @@ header[data-testid="stHeader"] {{
 .stApp div[data-testid="stAlert"] {{
     border-radius: 10px;
     border: 1px solid {border_color};
-}}
-
-/* ── INPUT FIELDS ── */
-.stApp div[data-baseweb="input"],
-.stApp div[data-baseweb="base-input"],
-.stApp .stTextInput > div > div {{
-    background-color: {input_bg} !important;
-    border: 1px solid {input_border} !important;
-    border-radius: 8px !important;
-}}
-
-.stApp div[data-baseweb="input"]:focus-within,
-.stApp .stTextInput > div > div:focus-within {{
-    border-color: #2563eb !important;
-    box-shadow: 0 0 0 1px #2563eb !important;
-}}
-
-.stApp .stTextInput input, 
-.stApp .stNumberInput input {{
-    background-color: transparent !important;
-    color: {text_main} !important;
-    border: none !important;
-    font-size: 0.9rem !important;
-    font-weight: 500 !important;
-}}
-
-.stApp ::placeholder,
-.stApp input::placeholder,
-.stApp textarea::placeholder,
-.stApp .stTextInput input::placeholder {{
-    color: {placeholder_color} !important;
-    opacity: 0.85 !important;
 }}
 
 .stApp label, .stApp .stMarkdown p, .stApp .stCaption {{
@@ -580,6 +618,12 @@ header[data-testid="stHeader"] {{
     font-size: 0.8rem;
     font-weight: 700;
     letter-spacing: 0.02em;
+}}
+
+.gw-badge.live {{
+    background: rgba(34, 197, 94, 0.15) !important;
+    color: #4ade80 !important;
+    border: 1px solid rgba(34, 197, 94, 0.4) !important;
 }}
 </style>
 """
@@ -603,16 +647,7 @@ def fmt_num(value, spec: str = ".2f") -> str:
 def render_top_bar(subtitle: str = ""):
     sub_html = f'<div class="top-bar-sub">{esc(subtitle)}</div>' if subtitle else ""
     st.markdown(
-        f"""
-        <div class="top-bar">
-            <div class="top-bar-brand">
-                <div>
-                    <div class="top-bar-title">FPL Optimizer</div>
-                    {sub_html}
-                </div>
-            </div>
-        </div>
-        """,
+        f"""<div class="top-bar"><div class="top-bar-brand"><div><div class="top-bar-title">FPL Optimizer</div>{sub_html}</div></div></div>""",
         unsafe_allow_html=True,
     )
 
@@ -632,27 +667,51 @@ def render_tag(label: str, tag_type: str = "gray") -> str:
     return f'<span class="tag tag-{tag_type}">{esc(label)}</span>'
 
 
-def render_list_card(title: str, tags: list[tuple[str, str]], meta: str, progress: float | None = None, progress_red: bool = False):
+def render_list_card(
+    title: str,
+    tags: list[tuple[str, str]],
+    meta: str,
+    progress: float | None = None,
+    progress_red: bool = False,
+    img_url: str | None = None,
+):
     tags_html = "".join(render_tag(label, t) for label, t in tags)
+
+    if img_url:
+        clean_url = esc(str(img_url))
+        avatar_html = (
+            f'<div class="card-avatar" style="background-image: url(\'{clean_url}\'), url(\'{SILHOUETTE_BASE64}\');"></div>'
+        )
+    else:
+        avatar_html = (
+            f'<div class="card-avatar" style="background-image: url(\'{SILHOUETTE_BASE64}\');"></div>'
+        )
+
     progress_html = ""
     if progress is not None:
         fill_class = " red" if progress_red else ""
-        progress_html = f"""
-        <div class="progress-bar-wrap">
-            <div class="progress-bar-fill{fill_class}" style="width: {min(progress, 100):.0f}%"></div>
-        </div>
-        """
-    st.markdown(
-        f"""
-        <div class="list-card">
-            <div class="list-card-title">{esc(title)}</div>
-            <div class="list-card-tags">{tags_html}</div>
-            <div class="list-card-meta">{meta}</div>
-            {progress_html}
-        </div>
-        """,
-        unsafe_allow_html=True,
+        progress_html = (
+            f'<div class="progress-bar-wrap">'
+            f'<div class="progress-bar-fill{fill_class}" style="width: {min(progress, 100):.0f}%"></div>'
+            f'</div>'
+        )
+
+    card_html = (
+        f'<div class="list-card">'
+        f'<div class="list-card-content">'
+        f'{avatar_html}'
+        f'<div class="list-card-body">'
+        f'<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">'
+        f'<div class="list-card-title" style="margin-bottom: 0;">{esc(title)}</div>'
+        f'<div class="list-card-tags" style="margin-bottom: 0;">{tags_html}</div>'
+        f'</div>'
+        f'<div class="list-card-meta">{meta}</div>'
+        f'{progress_html}'
+        f'</div>'
+        f'</div>'
+        f'</div>'
     )
+    st.markdown(card_html, unsafe_allow_html=True)
 
 
 def section_header(title: str, description: str = ""):

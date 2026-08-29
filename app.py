@@ -14,6 +14,7 @@ from data import (
     get_teams_fdr_map,
 )
 from tabs import (
+    render_defensive_stats_tab,
     render_expected_stats_tab,
     render_fixture_ticker_tab,
     render_rolling_form_tab,
@@ -30,7 +31,8 @@ if get_script_run_ctx() is None:
     sys.exit(subprocess.call([sys.executable, "-m", "streamlit", "run", __file__]))
 
 st.set_page_config(
-    page_title="FPL Strategic Dashboard",
+    page_title="FPL Optimizer",
+    page_icon="assets/fplo.png",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -74,7 +76,12 @@ teams_fdr_map = get_teams_fdr_map(conn, current_gw)
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown(f'<span class="gw-badge">NEXT · {gw_name}</span>', unsafe_allow_html=True)
+    # Dynamic live status badge
+    if "(Live)" in gw_name:
+        st.markdown(f'<span class="gw-badge live">● {gw_name.upper()}</span>', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<span class="gw-badge">NEXT · {gw_name}</span>', unsafe_allow_html=True)
+
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ☀️ / 🌙 Theme Toggle
@@ -118,11 +125,12 @@ apply_theme(is_dark=(st.session_state["theme_mode"] == "dark"))
 # ── Header Bar ────────────────────────────────────────────────────────────────
 render_top_bar(f"Strategic analytics & squad optimizer · {gw_name}")
 
-# ── Main Tabs (Squad Analyzer is Tab #1) ──────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
+# ── Main Tabs ─────────────────────────────────────────────────────────────────
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     [
         "Squad Analyzer",
         "Expected Stats",
+        "Defensive Contributions",
         "Rolling Form",
         "Fixture Ticker",
         "Transfer Market",
@@ -134,8 +142,10 @@ with tab1:
 with tab2:
     render_expected_stats_tab(conn, current_gw)
 with tab3:
-    render_rolling_form_tab(conn, current_gw, teams_fdr_map)
+    render_defensive_stats_tab(conn, current_gw)
 with tab4:
-    render_fixture_ticker_tab(conn, current_gw)
+    render_rolling_form_tab(conn, current_gw, teams_fdr_map)
 with tab5:
+    render_fixture_ticker_tab(conn, current_gw)
+with tab6:
     render_transfer_market_tab(conn, current_gw)
