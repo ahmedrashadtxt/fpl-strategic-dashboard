@@ -1820,11 +1820,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             st.markdown(
                 f"""
                 <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    <span style="font-size: 0.92rem; font-weight: 700; color: {banner_title_col};">
-
-                    {f"🃏 Optimal Wildcard Squad ({horizon_gws}-GW Run)" if chip_mode == "🃏 Wildcard" else (f"⚡ Optimal Free Hit Squad" if chip_mode == "⚡ Free Hit" else f"🔄 Transfer Squad ({horizon_gws}-GW Run)")}
-
-                    </span>
+                    <span style="font-size: 0.92rem; font-weight: 700; color: {banner_title_col};">{f"🃏 Optimal Wildcard Squad ({horizon_gws}-GW Run)" if chip_mode == "🃏 Wildcard" else (f"⚡ Optimal Free Hit Squad" if chip_mode == "⚡ Free Hit" else f"🔄 Transfer Squad ({horizon_gws}-GW Run)")}</span>
                     <span style="font-size: 0.80rem; font-weight: 600; color: {banner_sub_col}; margin-left: 6px;">({trans_formation} · {trans_pts:.1f} xP)</span>
                 </div>
                 """,

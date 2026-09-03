@@ -1137,69 +1137,18 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 st.toast("Dashboard & odds synced!", icon="⚡")
                 st.rerun()
 
-        col_tgl1, col_tgl2, col_tgl3, col_tgl4 = st.columns([1.2, 1.3, 3.0, 2.5])
+        
+        col_tgl1, col_tgl2, col_tgl3, col_tgl4 = st.columns([1.5, 1.6, 1.6, 3.5], vertical_alignment="center")
         with col_tgl1:
             pitch_view = st.toggle("🏟️ **Pitch View**", value=True, key="tab4_pitch_toggle")
         with col_tgl2:
             enable_comparison = st.toggle("⚖️ **Comparison**", value=False, key="tab4_compare_toggle")
+            
+        super_team_mode = False
         with col_tgl3:
-            super_team_mode = False
-            # Check if snapshot exists for lock UI
-
-            existing_snap = get_snapshot(conn, next_gw_id) if selected_eval_gw == next_gw_id else None
-
-            snap_locked = existing_snap is not None
-
-
-            if selected_eval_gw == next_gw_id:
-
-                col_lock_btn, col_lock_info = st.columns([1.6, 4.4], vertical_alignment="center")
-
-                with col_lock_btn:
-
-                    btn_label = "?? Re-Lock Lineup" if snap_locked else "?? Lock In Starting XI"
-
-                    if st.button(btn_label, key=f"commit_gw_{selected_eval_gw}", use_container_width=True):
-
-                        full_lineup_df = pd.concat([optimal_xi, optimal_bench], ignore_index=True)
-
-                        lineup_records = full_lineup_df.to_dict(orient="records")
-
-                        
-
-                        save_pre_gw_snapshot(
-
-                            conn=conn,
-
-                            gw=selected_eval_gw,
-
-                            lineup_data=lineup_records,
-
-                            chip=active_chip if active_chip != "None" else None,
-
-                            formation=optimal_formation,
-
-                            market_weight=market_weight if enable_betting else 0.0,
-
-                            factor_movement=factor_movement if enable_betting else False,
-
-                        )
-
-                        st.toast(f"GW{selected_eval_gw} optimal lineup committed to Audit Journal!", icon="?")
-
-                        st.rerun()
-
-
-                with col_lock_info:
-
-                    if snap_locked:
-
-                        lock_time = existing_snap.get("created_at", "")[:16].replace("T", " ")
-
-                        st.markdown(f"<span style='color:#22c55e; font-size:0.8rem; margin-left:10px;'>? Locked at {lock_time}</span>", unsafe_allow_html=True)
-
             if enable_comparison:
                 super_team_mode = st.toggle("🌟 **Super Team**", value=False, key="tab4_super_team_toggle")
+                
         with col_tgl4:
             enable_betting = st.toggle("📊 **Betting Market xG**", value=True, key="tab4_enable_betting")
             market_weight = 0.35
@@ -1220,6 +1169,37 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 with col_m2:
                     factor_movement = st.checkbox("⚡ Line Movement", value=True, key="tab4_factor_movement")
 
+        # BELOW the row: Lock Lineup
+        existing_snap = get_snapshot(conn, next_gw_id) if selected_eval_gw == next_gw_id else None
+        snap_locked = existing_snap is not None
+        
+        if selected_eval_gw == next_gw_id:
+            st.markdown("<div style='margin-top: 10px; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
+            col_lock_btn, col_lock_info = st.columns([2.0, 8.0], vertical_alignment="center")
+            
+            with col_lock_btn:
+                btn_label = "🔒 Re-Lock Lineup" if snap_locked else "🔒 Lock In Starting XI"
+                if st.button(btn_label, key=f"commit_gw_{selected_eval_gw}", use_container_width=True):
+                    full_lineup_df = pd.concat([optimal_xi, optimal_bench], ignore_index=True)
+                    lineup_records = full_lineup_df.to_dict(orient="records")
+                    
+                    save_pre_gw_snapshot(
+                        conn=conn,
+                        gw=selected_eval_gw,
+                        lineup_data=lineup_records,
+                        chip=active_chip if active_chip != "None" else None,
+                        formation=optimal_formation,
+                        market_weight=market_weight if enable_betting else 0.0,
+                        factor_movement=factor_movement if enable_betting else False,
+                    )
+                    st.toast(f"GW{selected_eval_gw} optimal lineup committed to Audit Journal!", icon="✅")
+                    st.rerun()
+                    
+            with col_lock_info:
+                if snap_locked:
+                    lock_time = existing_snap.get("created_at", "")[:16].replace("T", " ")
+                    st.markdown(f"<span style='color:#22c55e; font-size:0.85rem; font-weight:600;'>✅ Locked at {lock_time}</span>", unsafe_allow_html=True)
+        
         is_finished_gw = selected_eval_gw in finished_gw_ids
         is_ongoing_gw = (selected_eval_gw == ongoing_gw)
         is_live_or_finished = is_finished_gw or is_ongoing_gw
