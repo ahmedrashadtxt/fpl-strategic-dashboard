@@ -625,13 +625,13 @@ def solve_chip_transfers_pulp(
     is_free_hit: bool = False,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Linear programming solver for 15-man squad overhaul (Wildcard/Free Hit)."""
+    import pulp
     locked_set = set(locked_player_ids or [])
     blocked_in_set = set(blocked_in_player_ids or [])
     target_in_set = set(target_in_player_ids or []) - blocked_in_set
     
     prob = pulp.LpProblem("FPL_Chip_Solver", pulp.LpMaximize)
     
-    # 1. Candidate Pool Pre-Filtering (Crucial for Speed)
     raw_avail = candidate_league_df[
         (~candidate_league_df["id"].isin(blocked_in_set)) &
         (candidate_league_df["Status"].isin(['a', 'd'])) &
@@ -641,17 +641,16 @@ def solve_chip_transfers_pulp(
     
     top_cand_list = []
     
-    limits = {"GKP": 8, "DEF": 20, "MID": 25, "FWD": 15}
+    limits = {"GKP": 8, "DEF": 22, "MID": 25, "FWD": 16}
     for pos, limit in limits.items():
         pos_df = raw_avail[raw_avail["Pos"] == pos]
         if pos_df.empty: continue
         
         top_xp = pos_df.sort_values(by="Horizon_xP", ascending=False).head(limit)
-        cheapest = pos_df.sort_values(by="Cost", ascending=True).head(5)
+        cheapest = pos_df.sort_values(by="Cost", ascending=True).head(4)
         
         top_cand_list.extend([top_xp, cheapest])
         
-    # Always include the user's current 15 players
     current_in_raw = candidate_league_df[candidate_league_df["id"].isin(current_squad_df["id"].tolist())]
     top_cand_list.append(current_in_raw)
     
@@ -669,62 +668,42 @@ def solve_chip_transfers_pulp(
     cost_dict = avail.set_index("id")["Cost"].to_dict()
     xp_dict = avail.set_index("id")["Horizon_xP"].to_dict()
     
-    if is_free_hit:
-        for pid in avail["id"]:
-            x = pulp.LpVariable(f"squad_{pid}", cat="Binary")
-            player_vars[pid] = x
-            
-            if pid in locked_set or pid in target_in_set:
-                prob += x == 1
-            if pid in (force_out_player_ids or []) and pid not in locked_set:
-                prob += x == 0
-                
-        # Objective: Maximize sum(player_vars[i] * xP_next_gw[i])
-        prob += pulp.lpSum(player_vars[pid] * xp_dict[pid] for pid in player_vars)
+    for pid in avail["id"]:
+        x = pulp.LpVariable(f"squad_{pid}", cat="Binary")
+        y = pulp.LpVariable(f"start_{pid}", cat="Binary")
+        player_vars[pid] = x
+        starter_vars[pid] = y
         
-    else:
-        for pid in avail["id"]:
-            x = pulp.LpVariable(f"squad_{pid}", cat="Binary")
-            y = pulp.LpVariable(f"start_{pid}", cat="Binary")
-            player_vars[pid] = x
-            starter_vars[pid] = y
+        prob += y <= x
+        if pid in locked_set or pid in target_in_set:
+            prob += x == 1
+        if pid in (force_out_player_ids or []) and pid not in locked_set:
+            prob += x == 0
             
-            prob += y <= x
-            if pid in locked_set or pid in target_in_set:
-                prob += x == 1
-            if pid in (force_out_player_ids or []) and pid not in locked_set:
-                prob += x == 0
-                
-        # Position constraints for 11-man starting XI
-        prob += pulp.lpSum(starter_vars[pid] for pid in avail[avail["Pos"] == "GKP"]["id"]) == 1
-        prob += pulp.lpSum(starter_vars[pid] for pid in avail[avail["Pos"] == "DEF"]["id"]) >= 3
-        prob += pulp.lpSum(starter_vars[pid] for pid in avail[avail["Pos"] == "FWD"]["id"]) >= 1
-        prob += pulp.lpSum(starter_vars.values()) == 11
-        
-        # Objective: Maximize starting XI points + 0.1 * bench points
-        prob += pulp.lpSum(
-            starter_vars[pid] * xp_dict[pid] +
-            0.1 * (player_vars[pid] - starter_vars[pid]) * xp_dict[pid]
-            for pid in player_vars
-        )
+    prob += pulp.lpSum(starter_vars[pid] for pid in avail[avail["Pos"] == "GKP"]["id"]) == 1
+    prob += pulp.lpSum(starter_vars[pid] for pid in avail[avail["Pos"] == "DEF"]["id"]) >= 3
+    prob += pulp.lpSum(starter_vars[pid] for pid in avail[avail["Pos"] == "FWD"]["id"]) >= 1
+    prob += pulp.lpSum(starter_vars.values()) == 11
+    
+    prob += pulp.lpSum(
+        starter_vars[pid] * xp_dict[pid] +
+        0.10 * (player_vars[pid] - starter_vars[pid]) * xp_dict[pid]
+        for pid in player_vars
+    )
 
-    # Position constraints for 15-man squad
     prob += pulp.lpSum(player_vars[pid] for pid in avail[avail["Pos"] == "GKP"]["id"]) == 2
     prob += pulp.lpSum(player_vars[pid] for pid in avail[avail["Pos"] == "DEF"]["id"]) == 5
     prob += pulp.lpSum(player_vars[pid] for pid in avail[avail["Pos"] == "MID"]["id"]) == 5
     prob += pulp.lpSum(player_vars[pid] for pid in avail[avail["Pos"] == "FWD"]["id"]) == 3
     prob += pulp.lpSum(player_vars.values()) == 15
     
-    # Team constraints (max 3 per club)
     for team_id in avail["team_id"].unique():
         team_pids = avail[avail["team_id"] == team_id]["id"].tolist()
         prob += pulp.lpSum(player_vars[pid] for pid in team_pids) <= 3
         
-    # Budget constraint
     prob += pulp.lpSum(player_vars[pid] * cost_dict[pid] for pid in player_vars) <= team_value
     
-    # 3. Solver Guardrails & Timeouts
-    prob.solve(pulp.PULP_CBC_CMD(timeLimit=5, gapRel=0.005, msg=False))
+    prob.solve(pulp.PULP_CBC_CMD(timeLimit=6, gapRel=0.01, msg=False))
     
     if pulp.LpStatus[prob.status] != 'Optimal':
         return current_squad_df.copy(), []
@@ -739,7 +718,26 @@ def solve_chip_transfers_pulp(
     out_players = current_squad_df[~current_squad_df["id"].isin(selected_pids)].to_dict("records")
     in_players = final_squad[final_squad["is_transfer_in"]].to_dict("records")
     
-    for p_out, p_in in zip(out_players, in_players):
+    # Position-matched swaps
+    matched_in_indices = set()
+    for p_out in list(out_players):
+        for i, p_in in enumerate(in_players):
+            if i not in matched_in_indices and p_in["Pos"] == p_out["Pos"]:
+                matched_in_indices.add(i)
+                paired_transfers.append({
+                    "out": p_out,
+                    "in": p_in,
+                    "gain": round(p_in["Horizon_xP"] - p_out.get("Horizon_xP", 0), 1),
+                    "cost_diff": round(p_in["Cost"] - p_out.get("Cost", 0), 1),
+                    "target": p_in["id"] in target_in_set,
+                    "forced_out": p_out["id"] in (force_out_player_ids or []),
+                })
+                out_players.remove(p_out)
+                break
+
+    # Leftovers
+    leftover_in = [p for i, p in enumerate(in_players) if i not in matched_in_indices]
+    for p_out, p_in in zip(out_players, leftover_in):
         paired_transfers.append({
             "out": p_out,
             "in": p_in,
@@ -1576,17 +1574,73 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                 _missing_df[f"GW{_gw}"] = 0.0
             curr_squad_horizon = pd.concat([curr_squad_horizon, _missing_df], ignore_index=True)
 
-        transferred_squad_df, swaps = solve_multi_gw_transfers(
-            current_squad_df=curr_squad_horizon,
-            candidate_league_df=solver_candidate_df,
-            bank=bank_balance,
-            num_transfers=total_allowed_transfers,
-            locked_player_ids=locked_players,
-            target_in_player_ids=targeted_in_players,
-            force_out_player_ids=force_out_players,
-            blocked_in_player_ids=blocked_in_players,
-            min_avg_minutes=min_avg_mins,
-        )
+        if chip_mode in ["🃏 Wildcard", "⚡ Free Hit"]:
+
+
+            transferred_squad_df, swaps = solve_chip_transfers_pulp(
+
+
+                current_squad_df=curr_squad_horizon,
+
+
+                candidate_league_df=league_eval_df,
+
+
+                team_value=team_val,
+
+
+                locked_player_ids=locked_players,
+
+
+                target_in_player_ids=targeted_in_players,
+
+
+                force_out_player_ids=force_out_players,
+
+
+                blocked_in_player_ids=blocked_in_players,
+
+
+                is_free_hit=(chip_mode == "⚡ Free Hit"),
+
+
+            )
+
+
+        else:
+
+
+            transferred_squad_df, swaps = solve_multi_gw_transfers(
+
+
+                current_squad_df=curr_squad_horizon,
+
+
+                candidate_league_df=solver_candidate_df,
+
+
+                bank=bank_balance,
+
+
+                num_transfers=total_allowed_transfers,
+
+
+                locked_player_ids=locked_players,
+
+
+                target_in_player_ids=targeted_in_players,
+
+
+                force_out_player_ids=force_out_players,
+
+
+                blocked_in_player_ids=blocked_in_players,
+
+
+                min_avg_minutes=min_avg_mins,
+
+
+            )
 
         st.session_state[state_key] = {
             "transferred_squad_df": transferred_squad_df,
