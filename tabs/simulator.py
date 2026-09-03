@@ -11,6 +11,8 @@ def render_simulator_tab(conn, events_df, current_gw):
     is_dark = st.session_state.get("theme_mode", "dark") == "dark"
     banner_bg = "#151d24" if is_dark else "#ffffff"
     banner_border = "rgba(255, 255, 255, 0.08)" if is_dark else "#e2e8f0"
+    text_main = "#f8fafc" if is_dark else "#0f172a"
+    text_sub = "#94a3b8" if is_dark else "#64748b"
     
     st.markdown(
         f"""
