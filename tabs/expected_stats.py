@@ -1,4 +1,5 @@
 from data import get_manager_squad_ids
+import numpy as np
 import pandas as pd
 from rapidfuzz import fuzz, process
 from st_keyup import st_keyup
@@ -22,8 +23,8 @@ def get_player_img_url(photo, code=None):
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def fetch_expected_stats_base_data(_conn):
-    """Fetches all player attacking data and precomputes xP/90 metrics to eliminate keystroke lag."""
+def fetch_expected_stats_base_data(_conn, current_gw: int = 1):
+    """Fetches player attacking metrics and calculates expected gameweek points (Proj xP)."""
     table_check = pd.read_sql(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='player_past_seasons'",
         _conn,
@@ -79,6 +80,8 @@ def fetch_expected_stats_base_data(_conn):
         p.expected_assists AS xA,
         p.expected_goal_involvements AS xGI,
         p.expected_goal_involvements_per_90 AS xGI_per_90,
+        p.status AS Status,
+        p.chance_of_playing_next_round AS Chance,
         {hist_select}
         p.now_cost / 10.0 AS price_val
     FROM players p
@@ -100,27 +103,83 @@ def fetch_expected_stats_base_data(_conn):
         if col_name in df_xgi.columns:
             df_xgi[col_name] = pd.to_numeric(df_xgi[col_name], errors="coerce")
 
+    completed_gws = max(1, current_gw - 1)
+    df_xgi["Avg_Mins_GW"] = (df_xgi["Minutes"] / completed_gws).round(1)
+
+    pos_default_xgi90 = {1: 0.01, 2: 0.08, 3: 0.25, 4: 0.38}
+
+    def calc_proj_xp(row):
+        etype = int(row.get("element_type", 3))
+        mins = float(row.get("Minutes", 0))
+        price = float(row.get("Price", 5.0))
+        avg_mins = float(row.get("Avg_Mins_GW", 0))
+
+        # ── 1. Expected Match Minutes Ratio ──
+        if current_gw > 1:
+            if avg_mins >= 65:
+                mins_factor = min(1.0, avg_mins / 90.0)
+            elif avg_mins >= 30:
+                mins_factor = (avg_mins / 90.0) * 0.85
+            elif mins > 0:
+                mins_factor = max(0.05, mins / (completed_gws * 90.0))
+            else:
+                mins_factor = 0.80 if price >= 8.5 else (0.50 if price >= 6.5 else 0.15)
+        else:
+            mins_factor = 0.90 if price >= 8.0 else (0.75 if price >= 6.0 else 0.50)
+
+        # ── 2. Bayesian Shrinkage on Per-90 Attack Rates ──
+        sw = min(1.0, mins / 360.0) if current_gw > 1 else 0.0
+        pos_base_xgi = pos_default_xgi90.get(etype, 0.25)
+
+        if mins > 0:
+            raw_xg90 = (float(row.get("xG", 0)) / mins) * 90.0
+            raw_xa90 = (float(row.get("xA", 0)) / mins) * 90.0
+        else:
+            raw_xg90 = pos_base_xgi * 0.55
+            raw_xa90 = pos_base_xgi * 0.45
+
+        xg90 = (sw * raw_xg90) + ((1.0 - sw) * (pos_base_xgi * 0.55))
+        xa90 = (sw * raw_xa90) + ((1.0 - sw) * (pos_base_xgi * 0.45))
+
+        if etype == 4:
+            base_xp90 = (xg90 * 4.0) + (xa90 * 3.0) + 2.0
+        elif etype == 3:
+            base_xp90 = (xg90 * 5.0) + (xa90 * 3.0) + 2.3
+        else:
+            base_xp90 = (xg90 * 6.0) + (xa90 * 3.0) + 2.0
+
+        status = str(row.get("Status", "a"))
+        chance = row.get("Chance")
+        if status in ("i", "u", "s"):
+            avail = 0.0
+        elif pd.notna(chance) and str(chance).strip() not in ("", "None"):
+            avail = float(chance) / 100.0
+        else:
+            avail = 1.0
+
+        return round(max(0.0, base_xp90 * mins_factor * avail), 2)
+
     def calc_proj_xp_90(row):
         etype = int(row.get("element_type", 3))
         mins = float(row.get("Minutes", 0))
-        if mins >= 45:
-            xg90 = (float(row.get("xG", 0)) / mins) * 90.0
-            xa90 = (float(row.get("xA", 0)) / mins) * 90.0
-        else:
-            xgi90 = float(row.get("xGI_per_90", 0))
-            xg90 = xgi90 * 0.6
-            xa90 = xgi90 * 0.4
+        pos_base_xgi = pos_default_xgi90.get(etype, 0.25)
 
-        if etype == 4:
-            return round((xg90 * 4.0) + (xa90 * 3.0), 2)
-        elif etype == 3:
-            return round((xg90 * 5.0) + (xa90 * 3.0), 2)
-        elif etype == 2:
-            return round((xg90 * 6.0) + (xa90 * 3.0), 2)
+        sw = min(1.0, mins / 360.0) if current_gw > 1 else 0.0
+        if mins > 0:
+            raw_xg90 = (float(row.get("xG", 0)) / mins) * 90.0
+            raw_xa90 = (float(row.get("xA", 0)) / mins) * 90.0
         else:
-            return round((xg90 * 6.0) + (xa90 * 3.0), 2)
+            raw_xg90 = pos_base_xgi * 0.55
+            raw_xa90 = pos_base_xgi * 0.45
+
+        xg90 = (sw * raw_xg90) + ((1.0 - sw) * (pos_base_xgi * 0.55))
+        xa90 = (sw * raw_xa90) + ((1.0 - sw) * (pos_base_xgi * 0.45))
+
+        multiplier = 4.0 if etype == 4 else (5.0 if etype == 3 else 6.0)
+        return round((xg90 * multiplier) + (xa90 * 3.0) + 2.0, 2)
 
     if not df_xgi.empty:
+        df_xgi["Proj_Attacking_xP"] = df_xgi.apply(calc_proj_xp, axis=1)
         df_xgi["Proj_Attacking_xP_90"] = df_xgi.apply(calc_proj_xp_90, axis=1)
         df_xgi = df_xgi.dropna(subset=["Player"])
         df_xgi = df_xgi[df_xgi["Player"].astype(str).str.strip() != ""]
@@ -144,33 +203,34 @@ def render_expected_stats_tab(conn, current_gw):
     with col_t1_hdr:
         section_header(
             "Expected Attacking Points & Efficiency",
-            "Evaluate attacking performance via expected points per 90 and underlying goal involvements",
+            "Evaluate attacking output via expected gameweek points (Proj xP) and underlying goal involvements",
         )
     with col_t1_pop:
         st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
-        with st.popover("📖 Guide"):
+        with st.popover(":material/menu_book:  Guide"):
             st.markdown(
                 """
                 **Expected Attacking Points Guide**
                 
-                * **Proj xP/90:** Estimated attacking expected points per 90 minutes calculated from underlying expected goal involvements (`xGI/90 * position weight`).
+                * **Proj xP:** Absolute expected attacking points for the upcoming fixture, factoring in shot quality ($xG$), chance creation ($xA$), positional scoring, expected minutes, and availability.
+                * **Min Avg Mins / GW:** Filters out fringe and cameo assets to focus on regular starting players.
                 * **xG / xA / xGI:** Expected Goals, Assists, and Goal Involvements based on shot location and chance quality.
-                * **Price Filter:** Use the range slider to isolate players within your specific budget constraints.
                 * **Career GI / 90:** Multi-season historical actual performance baseline from prior Premier League campaigns.
                 """
             )
 
-    col_search, col1, col2, col3 = st.columns([1.5, 1, 1, 1])
+    col_search, col1, col2, col3 = st.columns([1.4, 1.2, 1, 1.2])
     with col_search:
         search_query = st_keyup(
-            "🔍 Search Player / Club",
+            ":material/search:  Search Player / Club",
             placeholder="e.g. Palmer, Haaland, Arsenal, MCI...",
             debounce=250,
             key="tab1_search_keyup",
         )
     with col1:
-        min_minutes = st.slider(
-            "Minimum Minutes Played", 0, 900, 0, step=45, key="tab1_min_mins"
+        min_avg_mins = st.slider(
+            ":material/timer:  Min Avg Mins / GW", 0, 90, 0, step=5, key="tab1_min_avg_mins",
+            help="Filter players by average minutes played per gameweek",
         )
     with col2:
         position_filter = st.selectbox(
@@ -180,9 +240,10 @@ def render_expected_stats_tab(conn, current_gw):
         sort_by = st.selectbox(
             "Rank By",
             [
-                "Projected Attacking xP / 90",
+                "Projected Attacking xP",
                 "Expected Goal Involvements (xGI)",
                 "xGI per 90",
+                "Projected Attacking xP / 90",
                 "Career GI / 90 (Past Seasons)",
                 "Total Points",
                 "Clean Sheets",
@@ -198,14 +259,14 @@ def render_expected_stats_tab(conn, current_gw):
         )
     with col_toggle1:
         only_my_squad_tab1 = st.toggle(
-            "🎯 Only My Squad Players", key="tab1_only_squad"
+            ":material/my_location:  Only My Squad Players", key="tab1_only_squad"
         )
     with col_toggle2:
         show_career_baseline = st.toggle(
-            "🏛️ Show Career Baselines (Past Seasons)", value=False, key="tab1_show_career"
+            ":material/account_balance:  Show Career Baselines (Past Seasons)", value=False, key="tab1_show_career"
         )
 
-    df_raw = fetch_expected_stats_base_data(conn)
+    df_raw = fetch_expected_stats_base_data(conn, current_gw)
     if df_raw.empty:
         st.info("No player data available.")
         return
@@ -216,14 +277,14 @@ def render_expected_stats_tab(conn, current_gw):
         filtered_df = filtered_df[filtered_df["Pos"] == position_filter]
 
     filtered_df = filtered_df[
-        (filtered_df["Minutes"] >= min_minutes)
+        (filtered_df["Avg_Mins_GW"] >= min_avg_mins)
         & (filtered_df["Price"] <= max_price_filter)
     ]
 
     active_manager_id_tab1 = st.session_state.get("manager_id", "").strip()
     if only_my_squad_tab1 and not filtered_df.empty:
         if not active_manager_id_tab1:
-            st.info("💡 Enter your FPL Team ID in the top bar to filter by your squad.")
+            st.info(":material/lightbulb: Enter your FPL Team ID in the top bar to filter by your squad.")
             filtered_df = filtered_df.iloc[0:0]
         else:
             squad_ids_tab1 = get_manager_squad_ids(active_manager_id_tab1, current_gw)
@@ -251,9 +312,10 @@ def render_expected_stats_tab(conn, current_gw):
 
     elif not filtered_df.empty:
         sort_map = {
-            "Projected Attacking xP / 90": ("Proj_Attacking_xP_90", False),
+            "Projected Attacking xP": ("Proj_Attacking_xP", False),
             "Expected Goal Involvements (xGI)": ("xGI", False),
             "xGI per 90": ("xGI_per_90", False),
+            "Projected Attacking xP / 90": ("Proj_Attacking_xP_90", False),
             "Career GI / 90 (Past Seasons)": ("Career_GI_90", False),
             "Total Points": ("Total_Points", False),
             "Clean Sheets": ("Clean_Sheets", False),
@@ -269,8 +331,8 @@ def render_expected_stats_tab(conn, current_gw):
     top_cards = filtered_df.head(min(4, len(filtered_df)))
     card_cols = st.columns(len(top_cards))
     for i, (_, row) in enumerate(top_cards.iterrows()):
-        proj_xp = float(row["Proj_Attacking_xP_90"])
-        xp_tag = (f"Proj {proj_xp:.2f} xP/90", "green")
+        proj_xp = float(row["Proj_Attacking_xP"])
+        xp_tag = (f"Proj {proj_xp:.2f} xP", "green")
         with card_cols[i]:
             c_gi = row.get("Career_GI_90")
             hist_note = (
@@ -282,9 +344,10 @@ def render_expected_stats_tab(conn, current_gw):
             render_list_card(
                 f"{row['Player']} ({row['Team']})",
                 [(row["Pos"], "blue"), xp_tag],
-                f'<span>Price</span> £{fmt_num(row["Price"], ".1f")} · <span>xGI</span>'
+                f'<span>Price</span> £{fmt_num(row["Price"], ".1f")} · <span>Avg M/GW</span>'
+                f' {int(row["Avg_Mins_GW"])}m · <span>xGI</span>'
                 f' {fmt_num(row["xGI"])} · <span>Pts</span>'
-                f' {int(float(row["Total_Points"]))} · <span>xP/90</span>'
+                f' {int(float(row["Total_Points"]))} · <span>Proj xP</span>'
                 f' {fmt_num(proj_xp, ".2f")}{hist_note}',
                 img_url=card_img,
             )
@@ -381,8 +444,8 @@ def render_expected_stats_tab(conn, current_gw):
     display_df = filtered_df.head(35)
     html_out = [theme_styles, '<div class="unified-table-wrapper"><table class="unified-table"><thead><tr>']
     html_out.append('<th style="text-align: left; padding-left: 1rem;">Player</th>')
-    html_out.append('<th>Club</th><th>Pos</th><th>Price</th><th>Mins</th><th>Pts</th><th>Gls</th><th>Ast</th><th>CS</th><th>Saves</th>')
-    html_out.append('<th>xG</th><th>xA</th><th>xGI</th><th>Proj xP/90</th><th>xGI/90</th>')
+    html_out.append('<th>Club</th><th>Pos</th><th>Price</th><th>Mins</th><th>Avg M/GW</th><th>Pts</th><th>Gls</th><th>Ast</th><th>CS</th><th>Saves</th>')
+    html_out.append('<th>xG</th><th>xA</th><th>xGI</th><th>Proj xP</th><th>xGI/90</th>')
 
     if show_career_baseline:
         html_out.append('<th>Career GI/90</th><th>Career Pts/90</th><th>Career Mins</th>')
@@ -391,7 +454,7 @@ def render_expected_stats_tab(conn, current_gw):
 
     for _, row in display_df.iterrows():
         p_img = get_player_img_url(row.get("photo"), row.get("code"))
-        proj_xp = float(row["Proj_Attacking_xP_90"])
+        proj_xp = float(row["Proj_Attacking_xP"])
 
         html_out.append("<tr>")
         html_out.append(
@@ -405,6 +468,7 @@ def render_expected_stats_tab(conn, current_gw):
         html_out.append(f'<td><span class="pos-pill pos-{row["Pos"]}">{row["Pos"]}</span></td>')
         html_out.append(f'<td>£{row["Price"]:.1f}</td>')
         html_out.append(f'<td>{int(row["Minutes"]):,}</td>')
+        html_out.append(f'<td>{int(row["Avg_Mins_GW"])}m</td>')
         html_out.append(f'<td style="font-weight: 700;">{int(row["Total_Points"])}</td>')
         html_out.append(f'<td>{int(row["Goals"])}</td>')
         html_out.append(f'<td>{int(row["Assists"])}</td>')

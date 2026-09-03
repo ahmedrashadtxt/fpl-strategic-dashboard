@@ -155,19 +155,19 @@ def build_player_tooltip(p: pd.Series, horizon_len: int = 1) -> str:
     news_row = ""
     if status != "a" and news and news != "None":
         clean_news = html.escape(news[:40] + ("..." if len(news) > 40 else ""))
-        news_row = f'<div class="tt-row tt-news"><span>⚠️ {clean_news}</span></div>'
+        news_row = f'<div class="tt-row tt-news"><span>:material/warning:  {clean_news}</span></div>'
 
     transfer_badge_row = ""
     if bool(p.get("is_transfer_in") is True):
         if bool(p.get("is_target_in") is True):
-            transfer_badge_row = '<div class="tt-row" style="color:#38bdf8; font-weight:700;"><span>🎯 Target Signing</span></div>'
+            transfer_badge_row = '<div class="tt-row" style="color:#38bdf8; font-weight:700;"><span>:material/my_location:  Target Signing</span></div>'
         else:
-            transfer_badge_row = '<div class="tt-row" style="color:#34d399; font-weight:700;"><span>🟢 Proposed Sign</span></div>'
+            transfer_badge_row = '<div class="tt-row" style="color:#34d399; font-weight:700;"><span>:material/circle:  Proposed Sign</span></div>'
     elif bool(p.get("is_transfer_out") is True):
         if bool(p.get("is_forced_out") is True):
-            transfer_badge_row = '<div class="tt-row" style="color:#f87171; font-weight:700;"><span>🔴 Forced Sale</span></div>'
+            transfer_badge_row = '<div class="tt-row" style="color:#f87171; font-weight:700;"><span>:material/circle:  Forced Sale</span></div>'
         else:
-            transfer_badge_row = '<div class="tt-row" style="color:#f87171; font-weight:700;"><span>🔴 Proposed Sale</span></div>'
+            transfer_badge_row = '<div class="tt-row" style="color:#f87171; font-weight:700;"><span>:material/circle:  Proposed Sale</span></div>'
 
     return (
         f'<div class="player-tooltip-card">'
@@ -244,7 +244,7 @@ def apply_market_projection_with_movement(
             "Market xG": round(mkt_team_xg, 2),
             "Diff": f"{diff:+.2f}",
             "CS Prob": f"{int(mkt_cs_prob * 100)}%",
-            "Verdict": "Market Bullish 📈" if diff > 0 else "Market Bearish 📉",
+            "Verdict": "Market Bullish :material/trending_up: " if diff > 0 else "Market Bearish :material/trending_down: ",
         }
 
     move_item = {
@@ -335,7 +335,7 @@ def evaluate_league_multi_gw(
     FROM fixtures f
     INNER JOIN teams th ON f.team_h = th.id
     INNER JOIN teams ta ON f.team_a = ta.id
-    WHERE f.event >= ? AND f.event <= ?
+    WHERE f.event >= :material/priority_high: AND f.event <= :material/priority_high:
     """
     fix_df = pd.read_sql(fix_query, _conn, params=[start_gw, end_gw])
     all_players_query = """
@@ -355,7 +355,7 @@ def evaluate_league_multi_gw(
     rolling_metrics = get_rolling_player_metrics(_conn)
     market_cache = load_db_market_odds(_conn) if enable_betting else {}
 
-    # DGW-safe fixture map: (team_id, gw) → list[fixture_dict].
+    # DGW-safe fixture map: (team_id, gw)  list[fixture_dict].
     # Using setdefault+append ensures double gameweeks accumulate both fixtures
     # instead of silently overwriting the first with the second.
     fixture_map: dict[tuple, list] = {}
@@ -535,7 +535,7 @@ def _maximize_leftover_budget(
     picks the highest-xP affordable candidate that satisfies team limits, committing
     cost and team-counts slot by slot. This eliminates the itertools.product
     combinatorial explosion while producing near-optimal results in practice
-    (slots are typically 1–2, making the greedy choice essentially exact).
+    (slots are typically 12, making the greedy choice essentially exact).
     """
     # Pre-sort candidates per position by xP descending for fast scanning
     pos_cand_map: dict[str, pd.DataFrame] = {}
@@ -1052,7 +1052,7 @@ def render_transfer_pitch_component(
             elif is_v:
                 cap_badge = '<div class="pitch-cap-badge vc">V</div>'
             elif is_target:
-                cap_badge = '<div class="pitch-cap-badge" style="background:#0284c7; color:#ffffff; font-size:0.55rem; width:18px; height:18px;">🎯</div>'
+                cap_badge = '<div class="pitch-cap-badge" style="background:#0284c7; color:#ffffff; font-size:0.55rem; width:18px; height:18px;">:material/my_location: </div>'
             elif is_in:
                 cap_badge = '<div class="pitch-cap-badge" style="background:#10b981; color:#ffffff; font-size:0.58rem; width:18px; height:18px;">IN</div>'
             elif is_out:
@@ -1068,7 +1068,7 @@ def render_transfer_pitch_component(
 
             tag = ""
             if is_target:
-                tag = '<span style="color:#38bdf8; font-weight:800; font-size:0.58rem;"> [🎯 TARGET]</span>'
+                tag = '<span style="color:#38bdf8; font-weight:800; font-size:0.58rem;"> [:material/my_location:  TARGET]</span>'
             elif is_in:
                 tag = '<span style="color:#34d399; font-weight:800; font-size:0.58rem;"> [IN]</span>'
             elif is_out:
@@ -1109,7 +1109,7 @@ def render_transfer_pitch_component(
 
             bench_badge = ""
             if is_b_target:
-                bench_badge = '<div class="pitch-cap-badge" style="background:#0284c7; color:#ffffff; font-size:0.55rem; width:18px; height:18px;">🎯</div>'
+                bench_badge = '<div class="pitch-cap-badge" style="background:#0284c7; color:#ffffff; font-size:0.55rem; width:18px; height:18px;">:material/my_location: </div>'
             elif is_b_in:
                 bench_badge = '<div class="pitch-cap-badge" style="background:#10b981; color:#ffffff; font-size:0.58rem; width:18px; height:18px;">IN</div>'
             elif is_b_out:
@@ -1121,7 +1121,7 @@ def render_transfer_pitch_component(
 
             b_tag = ""
             if is_b_target:
-                b_tag = '<span style="color:#38bdf8; font-weight:800; font-size:0.58rem;"> [🎯 TARGET]</span>'
+                b_tag = '<span style="color:#38bdf8; font-weight:800; font-size:0.58rem;"> [:material/my_location:  TARGET]</span>'
             elif is_b_in:
                 b_tag = '<span style="color:#34d399; font-weight:800; font-size:0.58rem;"> [IN]</span>'
             elif is_b_out:
@@ -1290,7 +1290,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
     mgr_to_use = st.session_state.get("manager_id", "").strip()
     if not mgr_to_use:
-        st.info("👆 Enter your FPL ID in the top search bar to load your squad.")
+        st.info(":material/arrow_upward:  Enter your FPL ID in the top search bar to load your squad.")
         return
 
     mgr_data = fetch_transfer_manager_entry(mgr_to_use)
@@ -1316,10 +1316,10 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
     calc_ft = calculate_available_fts(mgr_history)
 
     # ── Horizon & Transfer Parameters ─────────────────────────────────────────
-    st.markdown("#### ⚙️ Parameters & Horizon")
+    st.markdown("#### :material/settings:  Parameters & Horizon")
 
     if pick_ids:
-        placeholders = ",".join(["?"] * len(pick_ids))
+        placeholders = ",".join([":material/priority_high:"] * len(pick_ids))
         cur = conn.cursor()
         cur.execute(f"SELECT SUM(now_cost) FROM players WHERE id IN ({placeholders})", pick_ids)
         squad_sell = round((cur.fetchone()[0] or 1000) / 10.0, 1)
@@ -1328,7 +1328,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
     itb_val = entry_hist.get("bank", mgr_data.get("last_deadline_bank", 0)) / 10.0
     team_val = round(squad_sell + itb_val, 1)
 
-    chip_mode = st.radio("Strategy Mode:", ["Regular Transfers", "🃏 Wildcard", "⚡ Free Hit"], horizontal=True, index=0)
+    chip_mode = st.radio("Strategy Mode:", ["Regular Transfers", ":material/style:  Wildcard", ":material/bolt:  Free Hit"], horizontal=True, index=0)
 
 
     
@@ -1345,7 +1345,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
                 options=[1, 2, 3, 5],
 
-                format_func=lambda x: f"Next {x} Gameweek{'s' if x > 1 else ''} (GW{next_gw}–GW{next_gw + x - 1})",
+                format_func=lambda x: f"Next {x} Gameweek{'s' if x > 1 else ''} (GW{next_gw}GW{next_gw + x - 1})",
 
                 index=2,
 
@@ -1367,7 +1367,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
             st.metric("Planned Moves", f"{total_allowed_transfers} Transfers", delta=hit_cost_str if max_hits > 0 else None, delta_color="inverse")
 
-    elif chip_mode == "🃏 Wildcard":
+    elif chip_mode == ":material/style:  Wildcard":
 
         horizon_gws = st.selectbox(
 
@@ -1375,7 +1375,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
             options=[3, 5, 8],
 
-            format_func=lambda x: f"Next {x} Gameweeks (GW{next_gw}–GW{next_gw + x - 1})",
+            format_func=lambda x: f"Next {x} Gameweeks (GW{next_gw}GW{next_gw + x - 1})",
 
             index=1,
 
@@ -1387,7 +1387,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
         total_allowed_transfers = 15
 
-        st.info("🃏 **Wildcard Active**: Optimizing a permanent 15-man squad over the selected horizon with 0 point deductions.")
+        st.info(":material/style:  **Wildcard Active**: Optimizing a permanent 15-man squad over the selected horizon with 0 point deductions.")
 
 
         st.metric("Available Budget", f"£{team_val:.1f}m", help=f"Squad Sell Value: £{squad_sell:.1f}m | ITB: £{itb_val:.1f}m")
@@ -1407,7 +1407,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
         total_allowed_transfers = 15
 
-        st.info("⚡ **Free Hit Active**: Optimizing a single-gameweek £100m+ roster with 0 point deductions. Reverts automatically next gameweek.")
+        st.info(":material/bolt:  **Free Hit Active**: Optimizing a single-gameweek £100m+ roster with 0 point deductions. Reverts automatically next gameweek.")
 
 
         st.metric("Available Budget", f"£{team_val:.1f}m", help=f"Squad Sell Value: £{squad_sell:.1f}m | ITB: £{itb_val:.1f}m")
@@ -1419,9 +1419,9 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
     # ── View & Model Controls ─────────────────────────────────────────────────
     col_tgl1, col_tgl2, col_tgl3, col_tgl4 = st.columns([1.3, 1.6, 1.4, 1.7], vertical_alignment="center")
     with col_tgl1:
-        pitch_view = st.toggle("🏟️ **Pitch View**", value=True, key="transfer_pitch_toggle")
+        pitch_view = st.toggle(":material/stadium: **Pitch View**", value=True, key="transfer_pitch_toggle")
     with col_tgl2:
-        enable_betting = st.toggle("📊 **Betting Market xG**", value=True, key="transfer_betting_toggle")
+        enable_betting = st.toggle(":material/bar_chart:  **Betting Market xG**", value=True, key="transfer_betting_toggle")
     with col_tgl3:
         market_weight = 0.35
         if enable_betting:
@@ -1435,7 +1435,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             )
     with col_tgl4:
         min_avg_mins = st.slider(
-            "⏱️ Min Avg Mins / GW",
+            ":material/timer:  Min Avg Mins / GW",
             min_value=0,
             max_value=90,
             value=45,
@@ -1443,7 +1443,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             help="Filters out fringe players and cameo risks from transfer suggestions",
         )
 
-    placeholders = ",".join(["?"] * len(pick_ids))
+    placeholders = ",".join([":material/priority_high:"] * len(pick_ids))
     squad_query = f"""
     SELECT p.id, p.code, p.photo, p.web_name AS Player, p.team AS team_id,
            t.short_name AS Team,
@@ -1487,28 +1487,28 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
     for _, r in squad_df.iterrows():
         key = f"lock_{r['id']}"
         pos_options.append(key)
-        pos_labels[key] = f"🔒 Keep: {r['Player']} ({r['Team']} · {r['Pos']})"
+        pos_labels[key] = f":material/lock:  Keep: {r['Player']} ({r['Team']} · {r['Pos']})"
 
     for _, r in available_market_df.iterrows():
         key = f"target_{r['id']}"
         pos_options.append(key)
-        pos_labels[key] = f"🎯 Target: {r['Player']} ({r['Team']} · {r['Pos']} · £{r['Cost']:.1f}m · {r['Horizon_xP']:.1f} xP)"
+        pos_labels[key] = f":material/my_location:  Target: {r['Player']} ({r['Team']} · {r['Pos']} · £{r['Cost']:.1f}m · {r['Horizon_xP']:.1f} xP)"
 
     neg_options = []
     neg_labels = {}
     for _, r in squad_df.iterrows():
         key = f"sell_{r['id']}"
         neg_options.append(key)
-        neg_labels[key] = f"🔴 Sell: {r['Player']} ({r['Team']} · {r['Pos']})"
+        neg_labels[key] = f":material/circle:  Sell: {r['Player']} ({r['Team']} · {r['Pos']})"
 
     for _, r in available_market_df.iterrows():
         key = f"block_{r['id']}"
         neg_options.append(key)
-        neg_labels[key] = f"⛔ Blacklist: {r['Player']} ({r['Team']} · {r['Pos']} · £{r['Cost']:.1f}m)"
+        neg_labels[key] = f":material/block:  Blacklist: {r['Player']} ({r['Team']} · {r['Pos']} · £{r['Cost']:.1f}m)"
     col_pos, col_neg = st.columns(2)
     with col_pos:
         selected_positive = st.multiselect(
-            "✅ Priorities & Locks",
+            ":material/check_circle:  Priorities & Locks",
             options=pos_options,
             format_func=lambda k: pos_labels.get(k, k),
             default=[],
@@ -1519,7 +1519,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
     with col_neg:
         selected_negative = st.multiselect(
-            "❌ Forced Sales & Blacklist",
+            ":material/close:  Forced Sales & Blacklist",
             options=neg_options,
             format_func=lambda k: neg_labels.get(k, k),
             default=[],
@@ -1530,10 +1530,10 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
         if targeted_in_players and len(targeted_in_players) > total_allowed_transfers:
             st.warning(
-                f"⚠️ You targeted {len(targeted_in_players)} players, but only have {total_allowed_transfers} transfer(s) planned. Targets will be prioritized up to your limit."
+                f":material/warning:  You targeted {len(targeted_in_players)} players, but only have {total_allowed_transfers} transfer(s) planned. Targets will be prioritized up to your limit."
             )
 
-        submit_solve = st.button("🚀 Solve Transfers", width='stretch', type="primary")
+        submit_solve = st.button(":material/rocket:  Solve Transfers", width='stretch', type="primary")
 
     state_key = f"transfer_solve_{mgr_to_use}_{chip_mode}_{horizon_gws}_{ft_selected}_{max_hits}_{market_weight}"
     results_slot = st.empty()
@@ -1553,7 +1553,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         # stub rows so all 15 positions are represented and the optimizer can flag them.
         _missing_pick_ids = set(pick_ids) - set(curr_squad_horizon["id"].tolist())
         if _missing_pick_ids:
-            _miss_ph = ",".join(["?"] * len(_missing_pick_ids))
+            _miss_ph = ",".join([":material/priority_high:"] * len(_missing_pick_ids))
             _missing_df = pd.read_sql(
                 f"""SELECT p.id, p.code, p.photo, p.web_name AS Player, p.team AS team_id,
                        t.short_name AS Team,
@@ -1574,7 +1574,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                 _missing_df[f"GW{_gw}"] = 0.0
             curr_squad_horizon = pd.concat([curr_squad_horizon, _missing_df], ignore_index=True)
 
-        if chip_mode in ["🃏 Wildcard", "⚡ Free Hit"]:
+        if chip_mode in [":material/style:  Wildcard", ":material/bolt:  Free Hit"]:
 
 
             transferred_squad_df, swaps = solve_chip_transfers_pulp(
@@ -1601,7 +1601,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                 blocked_in_player_ids=blocked_in_players,
 
 
-                is_free_hit=(chip_mode == "⚡ Free Hit"),
+                is_free_hit=(chip_mode == ":material/bolt:  Free Hit"),
 
 
             )
@@ -1652,7 +1652,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         results_slot.empty()
 
     if state_key not in st.session_state:
-        st.info("👆 Adjust settings and click 'Solve Transfers' to begin.")
+        st.info(":material/arrow_upward:  Adjust settings and click 'Solve Transfers' to begin.")
         return
 
     res = st.session_state[state_key]
@@ -1689,16 +1689,16 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         m3.metric("Remaining In Bank", f"£{(bank_balance - sum(s['cost_diff'] for s in swaps)):.1f}m")
         m4.metric("Moves Executed", f"{len(swaps)} of {total_allowed_transfers}")
 
-        if chip_mode == "🃏 Wildcard":
+        if chip_mode == ":material/style:  Wildcard":
 
 
-            st.markdown("### 🃏 Optimal Wildcard Squad (Permanent Overhaul, 0 Hits)")
+            st.markdown("### :material/style:  Optimal Wildcard Squad (Permanent Overhaul, 0 Hits)")
 
 
-        elif chip_mode == "⚡ Free Hit":
+        elif chip_mode == ":material/bolt:  Free Hit":
 
 
-            st.markdown("### ⚡ Optimal Free Hit Squad (1-Week Maximum Ceiling, 0 Hits)")
+            st.markdown("### :material/bolt:  Optimal Free Hit Squad (1-Week Maximum Ceiling, 0 Hits)")
 
 
         else:
@@ -1707,17 +1707,17 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             hit_val = max(0, len(swaps) - calc_ft) * 4
 
 
-            st.markdown(f"### 🎯 Optimal Transfer Route ({len(swaps)} moves, -{hit_val} pts)")
+            st.markdown(f"### :material/my_location:  Optimal Transfer Route ({len(swaps)} moves, -{hit_val} pts)")
         if not swaps:
-            st.success("✅ Your current squad is optimal for this horizon. No transfer yields higher starting points within your budget.")
+            st.success(":material/check_circle:  Your current squad is optimal for this horizon. No transfer yields higher starting points within your budget.")
         else:
             for s in swaps:
                 c_out, c_in, c_delta = st.columns([3, 3, 2])
                 is_target = s.get("target", False)
                 is_forced = s.get("forced_out", False)
 
-                out_badge_title = "🔴 FORCED SALE" if is_forced else "🔴 TRANSFER OUT"
-                in_badge_title = "🎯 TARGET SIGNING" if is_target else "🟢 TRANSFER IN"
+                out_badge_title = ":material/circle:  FORCED SALE" if is_forced else ":material/circle:  TRANSFER OUT"
+                in_badge_title = ":material/my_location:  TARGET SIGNING" if is_target else ":material/circle:  TRANSFER IN"
                 in_badge_color = "#38bdf8" if is_target else "#4ade80"
                 in_bg_color = "rgba(56, 189, 248, 0.1)" if is_target else "rgba(34, 197, 94, 0.1)"
                 in_border_color = "rgba(56, 189, 248, 0.35)" if is_target else "rgba(34, 197, 94, 0.3)"
@@ -1757,7 +1757,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                     )
                 st.markdown("<div style='margin-bottom: 6px;'></div>", unsafe_allow_html=True)
 
-        st.markdown("### ⚖️ Squad Visual Comparison (Current vs Transfer)")
+        st.markdown("### :material/balance:  Squad Visual Comparison (Current vs Transfer)")
         is_dark_theme = st.session_state.get("theme_mode", "dark") == "dark"
         banner_title_col = "#f8fafc" if is_dark_theme else "#0f172a"
         banner_sub_col = "#94a3b8" if is_dark_theme else "#64748b"
@@ -1767,7 +1767,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             st.markdown(
                 f"""
                 <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    <span style="font-size: 0.92rem; font-weight: 700; color: {banner_title_col};">👤 Current Squad ({horizon_gws}-GW Run)</span>
+                    <span style="font-size: 0.92rem; font-weight: 700; color: {banner_title_col};">:material/person:  Current Squad ({horizon_gws}-GW Run)</span>
                     <span style="font-size: 0.80rem; font-weight: 600; color: {banner_sub_col}; margin-left: 6px;">({base_formation} · {base_pts:.1f} xP)</span>
                 </div>
                 """,
@@ -1800,7 +1800,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                         img_url=get_player_img_url(row.get("photo"), row.get("code")),
                     )
                 if not base_bench.empty:
-                    st.markdown("##### 🪑 Current Bench")
+                    st.markdown("##### :material/chair:  Current Bench")
                     for idx, (_, row) in enumerate(base_bench.iterrows()):
                         pos = row.get("Pos", "")
                         sub_label = "Sub GKP" if pos == "GKP" else f"Sub {idx}"
@@ -1820,7 +1820,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             st.markdown(
                 f"""
                 <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    <span style="font-size: 0.92rem; font-weight: 700; color: {banner_title_col};">{f"🃏 Optimal Wildcard Squad ({horizon_gws}-GW Run)" if chip_mode == "🃏 Wildcard" else (f"⚡ Optimal Free Hit Squad" if chip_mode == "⚡ Free Hit" else f"🔄 Transfer Squad ({horizon_gws}-GW Run)")}</span>
+                    <span style="font-size: 0.92rem; font-weight: 700; color: {banner_title_col};">{f":material/style:  Optimal Wildcard Squad ({horizon_gws}-GW Run)" if chip_mode == ":material/style:  Wildcard" else (f":material/bolt:  Optimal Free Hit Squad" if chip_mode == ":material/bolt:  Free Hit" else f":material/sync:  Transfer Squad ({horizon_gws}-GW Run)")}</span>
                     <span style="font-size: 0.80rem; font-weight: 600; color: {banner_sub_col}; margin-left: 6px;">({trans_formation} · {trans_pts:.1f} xP)</span>
                 </div>
                 """,
@@ -1838,7 +1838,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                 for idx, (_, row) in enumerate(trans_xi.iterrows()):
                     tags = [(row["Pos"], "blue")]
                     if bool(row.get("is_target_in") is True):
-                        tags.append(("Target In 🎯", "yellow"))
+                        tags.append(("Target In :material/my_location: ", "yellow"))
                     elif bool(row.get("is_transfer_in") is True):
                         tags.append(("Transfer In", "green"))
 
@@ -1853,24 +1853,24 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                         img_url=get_player_img_url(row.get("photo"), row.get("code")),
                     )
                 if not trans_bench.empty:
-                    st.markdown("##### 👥 Transfer Bench")
+                    st.markdown("##### :material/group:  Transfer Bench")
                     for idx, (_, row) in enumerate(trans_bench.iterrows()):
                         pos = row.get("Pos", "")
                         sub_label = "Sub GKP" if pos == "GKP" else f"Sub {idx}"
                         tags = [(pos, "blue"), (sub_label, "gray")]
                         if bool(row.get("is_target_in") is True):
-                            tags.append(("Target In 🎯", "yellow"))
+                            tags.append(("Target In :material/my_location: ", "yellow"))
                         elif bool(row.get("is_transfer_in") is True):
                             tags.append(("Transfer In", "green"))
                         render_list_card(
-                            f"{row['Player']} • {row['Team']}",
+                            f"{row['Player']}  {row['Team']}",
                             tags,
-                            f'<span>Horizon xP</span> {fmt_num(row["Horizon_xP"], ".1f")} • <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
+                            f'<span>Horizon xP</span> {fmt_num(row["Horizon_xP"], ".1f")}  <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
                             img_url=get_player_img_url(row.get("photo"), row.get("code")),
                         )
 
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("💾 Save Transfer Plan for Simulator", key="save_transfer_sim_btn", type="primary", use_container_width=True):
+            if st.button(":material/save:  Save Transfer Plan for Simulator", key="save_transfer_sim_btn", type="primary", use_container_width=True):
                 st.session_state["transfer_result"] = {
                     "transferred_squad_df": transferred_squad_df,
                     "swaps": swaps,
@@ -1878,13 +1878,13 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                     "locked_players": locked_players,
                     "targeted_in_players": targeted_in_players
                 }
-                st.toast("Transfer Plan Saved! Navigate to Match Simulator to run scenarios.", icon="✅")
+                st.toast("Transfer Plan Saved! Navigate to Match Simulator to run scenarios.", icon=":material/check_circle: ")
                 
-        st.markdown("### 📋 Multi-Gameweek Performance Ledger")
+        st.markdown("### :material/content_paste:  Multi-Gameweek Performance Ledger")
         display_ledger = transferred_squad_df.copy()
         display_ledger["Role"] = display_ledger["id"].map(
             lambda x: (
-                "Target Signing 🎯"
+                "Target Signing :material/my_location: "
                 if x in in_ids and x in (targeted_in_players or [])
                 else ("New Signing" if x in in_ids else ("Locked" if x in locked_players else "Retained"))
             )

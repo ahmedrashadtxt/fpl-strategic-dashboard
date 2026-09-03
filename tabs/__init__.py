@@ -1,4 +1,4 @@
-﻿from .defensive_stats import render_defensive_stats_tab
+from .defensive_stats import render_defensive_stats_tab
 from .expected_stats import render_expected_stats_tab
 from .fixture_ticker import render_fixture_ticker_tab
 from .rolling_form import render_rolling_form_tab

@@ -1,10 +1,17 @@
-from data import get_manager_squad_ids
+from data import get_manager_squad_ids, get_teams_fdr_map
+import numpy as np
 import pandas as pd
 import plotly.express as px
 from rapidfuzz import fuzz, process
 from st_keyup import st_keyup
 import streamlit as st
-from theme import SILHOUETTE_BASE64, fmt_num, render_list_card, render_sortable_table, section_header
+from theme import (
+    SILHOUETTE_BASE64,
+    fmt_num,
+    render_list_card,
+    render_sortable_table,
+    section_header,
+)
 
 pos_map = {"GKP": 1, "DEF": 2, "MID": 3, "FWD": 4}
 
@@ -25,6 +32,13 @@ def get_player_img_url(photo, code=None):
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_rolling_base_data(_conn, window_size: int):
     """Caches rolling window computations per window size."""
+    table_check = pd.read_sql(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='player_match_history'",
+        _conn,
+    )
+    if table_check.empty:
+        return pd.DataFrame()
+
     rolling_query = f"""
     WITH ranked_matches AS (
         SELECT
@@ -132,7 +146,7 @@ def fetch_rolling_base_data(_conn, window_size: int):
 
 
 @st.fragment
-def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
+def render_rolling_form_tab(conn, current_gw: int = 1, teams_fdr_map: dict = None):
     col_t2_hdr, col_t2_pop = st.columns([6, 1])
     with col_t2_hdr:
         section_header(
@@ -141,13 +155,13 @@ def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
         )
     with col_t2_pop:
         st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
-        with st.popover("📖 Guide"):
+        with st.popover(":material/menu_book:  Guide"):
             st.markdown(
                 """
                 **Form vs. Fixtures Scatter Matrix**
                 
                 * **Proj Form xP:** Blended expected points per match combining underlying rolling $xGI/90$, actual rolling points form, appearance security, and upcoming 5-GW fixture difficulty.
-                * **Upcoming 5-GW FDR:** Cumulative fixture rating over the next 5 games (lower score = greener schedule).
+                * **Upcoming 5-GW FDR:** Cumulative fixture difficulty rating over the next 5 games (lower score = greener schedule).
                 * **Price Filter:** Isolate players within your budget constraints.
                 * **Min Matches Filter:** Filters out rotation risks so you only evaluate regular starters.
                 """
@@ -159,8 +173,11 @@ def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
     )
 
     if table_exists.empty:
-        st.warning("⚠️ Match history table `player_match_history` was not found in `fpl.db`.")
+        st.warning(":material/warning:  Match history table `player_match_history` was not found in `fpl.db`.")
         return
+
+    if teams_fdr_map is None:
+        teams_fdr_map = get_teams_fdr_map(conn, current_gw)
 
     effective_gw = max(1, current_gw)
     col_search2, col_w, col_pos2, col_min_matches, col_min_mins2, col_sort2 = (
@@ -168,7 +185,7 @@ def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
     )
     with col_search2:
         search_query2 = st_keyup(
-            "🔍 Search Player / Club",
+            ":material/search:  Search Player / Club",
             placeholder="e.g. Cherki, Saka, Chelsea, ARS...",
             debounce=250,
             key="tab2_search_keyup",
@@ -221,7 +238,7 @@ def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
             "Filter Max Price (£M)", 4.0, 15.5, 15.5, step=0.5, key="roll_max_price"
         )
     with col_toggle_squad:
-        only_my_squad = st.toggle("🎯 Only My Squad Players", key="tab2_only_squad")
+        only_my_squad = st.toggle(":material/my_location:  Only My Squad Players", key="tab2_only_squad")
 
     raw_rolling_df = fetch_rolling_base_data(conn, window_size)
     if raw_rolling_df.empty:
@@ -257,12 +274,13 @@ def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
         blended_raw = (0.55 * (app_pts + underlying_xp)) + (0.45 * avg_pts)
         return round(blended_raw * schedule_mult, 2)
 
-    filtered_df["Proj_Form_xP"] = filtered_df.apply(calc_rolling_proj_xp, axis=1)
+    if not filtered_df.empty:
+        filtered_df["Proj_Form_xP"] = filtered_df.apply(calc_rolling_proj_xp, axis=1)
 
     active_manager_id = st.session_state.get("manager_id", "").strip()
     if only_my_squad and not filtered_df.empty:
         if not active_manager_id:
-            st.info("💡 Enter your FPL Team ID in the top bar to filter by your squad.")
+            st.info(":material/lightbulb: Enter your FPL Team ID in the top bar to filter by your squad.")
             filtered_df = filtered_df.iloc[0:0]
         else:
             squad_ids = get_manager_squad_ids(active_manager_id, current_gw)
@@ -304,6 +322,7 @@ def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
         st.info("No players found matching the current rolling filter criteria.")
         return
 
+    # ── Scatter Matrix ────────────────────────────────────────────────────────
     if len(filtered_df) >= 2:
         x_mid = float(filtered_df["Upcoming_FDR"].median())
         y_mid = float(filtered_df["Proj_Form_xP"].median())
@@ -314,6 +333,7 @@ def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
             y="Proj_Form_xP",
             color="Pos",
             size="Price",
+            size_max=16,
             hover_name="Player",
             hover_data={
                 "Team": True,
@@ -340,6 +360,13 @@ def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
             },
         )
 
+        fig.update_traces(
+            marker=dict(
+                opacity=0.88,
+                line=dict(width=1, color="rgba(255, 255, 255, 0.45)"),
+            )
+        )
+
         fig.add_vline(x=x_mid, line_dash="dash", line_color="rgba(255, 255, 255, 0.25)")
         fig.add_hline(y=y_mid, line_dash="dash", line_color="rgba(255, 255, 255, 0.25)")
 
@@ -349,25 +376,30 @@ def render_rolling_form_tab(conn, current_gw, teams_fdr_map):
             paper_bgcolor="rgba(15, 23, 42, 0.0)",
             margin=dict(l=20, r=20, t=50, b=20),
             height=450,
+            xaxis=dict(gridcolor="rgba(255, 255, 255, 0.08)", zeroline=False),
+            yaxis=dict(gridcolor="rgba(255, 255, 255, 0.08)", zeroline=False),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
-    top_rolling = filtered_df.head(min(5, len(filtered_df)))
-    cols_r = st.columns(len(top_rolling))
-    for i, (_, row) in enumerate(top_rolling.iterrows()):
-        card_img = get_player_img_url(row.get("photo"), row.get("code"))
-        proj_xp = float(row["Proj_Form_xP"])
-        with cols_r[i]:
-            render_list_card(
-                f"{row['Player']} ({row['Team']})",
-                [(row["Pos"], "blue"), (f"Proj {proj_xp:.1f} xP", "green")],
-                f'<span>Price</span> £{fmt_num(row["Price"], ".1f")} · <span>Form xP</span>'
-                f' <strong>{fmt_num(proj_xp, ".2f")}</strong> · <span>Avg Pts</span>'
-                f' {fmt_num(row["Rolling_Avg_Pts"], ".1f")} · <span>Next 5 FDR</span>'
-                f' {int(row["Upcoming_FDR"])}',
-                img_url=card_img,
-            )
+    # ── Top Form Cards ────────────────────────────────────────────────────────
+    top_rolling = filtered_df.head(min(4, len(filtered_df)))
+    if not top_rolling.empty:
+        cols_r = st.columns(len(top_rolling))
+        for i, (_, row) in enumerate(top_rolling.iterrows()):
+            card_img = get_player_img_url(row.get("photo"), row.get("code"))
+            proj_xp = float(row["Proj_Form_xP"])
+            with cols_r[i]:
+                render_list_card(
+                    f"{row['Player']} ({row['Team']})",
+                    [(row["Pos"], "blue"), (f"Proj {proj_xp:.1f} xP", "green")],
+                    f'<span>Price</span> £{fmt_num(row["Price"], ".1f")} · <span>Form xP</span>'
+                    f' <strong>{fmt_num(proj_xp, ".2f")}</strong> · <span>Avg Pts</span>'
+                    f' {fmt_num(row["Rolling_Avg_Pts"], ".1f")} · <span>Next 5 FDR</span>'
+                    f' {int(row["Upcoming_FDR"])}',
+                    img_url=card_img,
+                )
 
+    # ── Table Display ─────────────────────────────────────────────────────────
     is_dark = st.session_state.get("theme_mode", "dark") == "dark"
 
     theme_styles = f"""

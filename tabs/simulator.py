@@ -9,20 +9,17 @@ def render_simulator_tab(conn, events_df, current_gw):
     
     # ── Header & Banner ──
     is_dark = st.session_state.get("theme_mode", "dark") == "dark"
-    banner_bg = "linear-gradient(90deg, #1e293b, #0f172a)" if is_dark else "linear-gradient(90deg, #f8fafc, #e2e8f0)"
-    text_main = "#ffffff" if is_dark else "#0f172a"
-    text_sub = "#94a3b8" if is_dark else "#64748b"
+    banner_bg = "#151d24" if is_dark else "#ffffff"
+    banner_border = "rgba(255, 255, 255, 0.08)" if is_dark else "#e2e8f0"
     
     st.markdown(
         f"""
-        <div style="background: {banner_bg}; padding: 1.2rem; border-radius: 12px; border: 1px solid {'rgba(255,255,255,0.08)' if is_dark else 'rgba(0,0,0,0.05)'}; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between;">
-            <div>
-                <h3 style="margin: 0; padding-bottom: 0.2rem; font-family: 'Outfit', sans-serif; font-size: 1.3rem; color: {text_main};">
-                    🎲 Monte Carlo Gameweek Simulator
-                </h3>
-                <span style="font-size: 0.8rem; color: {text_sub};">
-                    Stress-test your squad across thousands of probabilistic match outcomes.
-                </span>
+        <div style="background-color: {banner_bg}; border: 1px solid {banner_border}; border-radius: 8px; padding: 0.85rem 1.1rem; margin: 0.4rem 0 1.5rem 0; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <span style="font-size: 1rem; font-weight: 700; color: {text_main};">:material/casino: Monte Carlo Gameweek Simulator</span><br>
+                    <span style="font-size: 0.8rem; color: {text_sub};">Stress-test your squad across thousands of probabilistic match outcomes.</span>
+                </div>
             </div>
         </div>
         """,
@@ -30,32 +27,32 @@ def render_simulator_tab(conn, events_df, current_gw):
     )
     
 
-    st.markdown(f"#### 🎯 Target Gameweek")
+    st.markdown(f"#### :material/my_location:  Target Gameweek")
     all_gws = events_df[events_df["id"] >= current_gw]["id"].tolist()
     if not all_gws:
         all_gws = [current_gw]
         
     selected_gw = st.selectbox("Simulate Gameweek:", all_gws, label_visibility="collapsed")
     
-    st.markdown(f"#### 📋 Squad Source")
+    st.markdown(f"#### :material/content_paste:  Squad Source")
     if "sim_squad_mode" not in st.session_state:
-        st.session_state["sim_squad_mode"] = "👤 My Active Squad"
+        st.session_state["sim_squad_mode"] = ":material/person:  My Active Squad"
         
     b1, b2, b3 = st.columns(3)
     def set_squad(mode):
         st.session_state["sim_squad_mode"] = mode
         
     with b1:
-        if st.button("👤 My Active Squad", key="chip_btn_sim_1", type="primary" if st.session_state["sim_squad_mode"] == "👤 My Active Squad" else "secondary", use_container_width=True):
-            set_squad("👤 My Active Squad")
+        if st.button(":material/person:  My Active Squad", key="chip_btn_sim_1", type="primary" if st.session_state["sim_squad_mode"] == ":material/person:  My Active Squad" else "secondary", use_container_width=True):
+            set_squad(":material/person:  My Active Squad")
             st.rerun()
     with b2:
-        if st.button("🔄 Post-Transfer Plan", key="chip_btn_sim_2", type="primary" if st.session_state["sim_squad_mode"] == "🔄 Post-Transfer Plan" else "secondary", use_container_width=True):
-            set_squad("🔄 Post-Transfer Plan")
+        if st.button(":material/sync:  Post-Transfer Plan", key="chip_btn_sim_2", type="primary" if st.session_state["sim_squad_mode"] == ":material/sync:  Post-Transfer Plan" else "secondary", use_container_width=True):
+            set_squad(":material/sync:  Post-Transfer Plan")
             st.rerun()
     with b3:
-        if st.button("🛠️ Custom 15-Player Sandbox", key="chip_btn_sim_4", type="primary" if st.session_state["sim_squad_mode"] == "🛠️ Custom 15-Player Sandbox" else "secondary", use_container_width=True):
-            set_squad("🛠️ Custom 15-Player Sandbox")
+        if st.button(":material/build:  Custom 15-Player Sandbox", key="chip_btn_sim_4", type="primary" if st.session_state["sim_squad_mode"] == ":material/build:  Custom 15-Player Sandbox" else "secondary", use_container_width=True):
+            set_squad(":material/build:  Custom 15-Player Sandbox")
             st.rerun()
             
     squad_mode = st.session_state["sim_squad_mode"]
@@ -65,7 +62,7 @@ def render_simulator_tab(conn, events_df, current_gw):
     # Load Squad based on mode
     squad_df = None
     
-    if squad_mode == "👤 My Active Squad":
+    if squad_mode == ":material/person:  My Active Squad":
         if not manager_id:
             st.info("Please enter your FPL ID in the top header to load your active squad.")
             return
@@ -78,20 +75,20 @@ def render_simulator_tab(conn, events_df, current_gw):
         players_query = f"SELECT * FROM players WHERE id IN ({','.join(map(str, squad_ids))})"
         squad_df = pd.read_sql_query(players_query, conn)
         
-    elif squad_mode == "🔄 Post-Transfer Plan":
+    elif squad_mode == ":material/sync:  Post-Transfer Plan":
         transfer_result = st.session_state.get("transfer_result", {})
         if "transferred_squad_df" not in transfer_result:
             st.info("No active transfer plan found in session state. Please visit the Transfer Analyzer to solve transfers first.")
             return
         squad_df = transfer_result["transferred_squad_df"]
         
-    elif squad_mode == "🌟 Budget Dream 15":
+    elif squad_mode == ":material/star:  Budget Dream 15":
         if "budget_dream_15_df" not in st.session_state:
             st.info("No Budget Dream 15 found. Please visit Squad Analyzer to generate and save it.")
             return
         squad_df = st.session_state["budget_dream_15_df"]
         
-    elif squad_mode == "🛠️ Custom 15-Player Sandbox":
+    elif squad_mode == ":material/build:  Custom 15-Player Sandbox":
         players_df = pd.read_sql_query("SELECT id, web_name, team, element_type, now_cost, total_points FROM players WHERE status='a'", conn)
         # Create readable options
         teams_df = pd.read_sql_query("SELECT id, short_name FROM teams", conn)
@@ -101,7 +98,7 @@ def render_simulator_tab(conn, events_df, current_gw):
         col_picker, col_btn = st.columns([5, 1], gap="medium")
         with col_btn:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🎲 Random 15", use_container_width=True):
+            if st.button(":material/casino:  Random 15", use_container_width=True):
                 players_df["weight"] = players_df["total_points"].clip(lower=5) + (players_df["now_cost"] * 0.5)
                 for _ in range(500):
                     sq = pd.concat([
@@ -139,7 +136,7 @@ def render_simulator_tab(conn, events_df, current_gw):
     FROM fixtures f
     INNER JOIN teams th ON f.team_h = th.id
     INNER JOIN teams ta ON f.team_a = ta.id
-    WHERE f.event = ?
+    WHERE f.event = :material/priority_high:
     """
     fixtures_df = pd.read_sql_query(adv_fixtures_query, conn, params=[selected_gw])
     from data import get_teams_fdr_map, get_fixture_for_team, get_historical_player_baselines
@@ -167,7 +164,7 @@ def render_simulator_tab(conn, events_df, current_gw):
         
         # For accurate solver xP, rely entirely on the pre-computed Proj_Pts if we loaded the Dream 15
         # Otherwise calculate natively using the odds_map injection to match the analyzer tab
-        if squad_mode == "🌟 Budget Dream 15" and "Proj_Pts" in p_dict and pd.notna(p_dict["Proj_Pts"]):
+        if squad_mode == ":material/star:  Budget Dream 15" and "Proj_Pts" in p_dict and pd.notna(p_dict["Proj_Pts"]):
             pts = float(p_dict["Proj_Pts"])
         else:
             fix_info = get_fixture_for_team(fixtures_df, int(p_dict["team"]), selected_gw)
@@ -330,15 +327,15 @@ def render_simulator_tab(conn, events_df, current_gw):
                 vc_id = top_players.iloc[1]["id"]
                 
         # Sim Controls
-        st.markdown(f"#### ⚙️ Simulation Settings")
+        st.markdown(f"#### :material/settings:  Simulation Settings")
         n_sims = st.select_slider("Iterations:", options=[1000, 5000, 10000, 20000], value=10000)
-        compare_rival = st.checkbox("⚔️ Compare Against Benchmark")
+        compare_rival = st.checkbox(":material/swords:  Compare Against Benchmark")
         compare_mode = None
         if compare_rival:
             compare_mode = "My Current Squad vs Transfer Plan"
             st.caption("Benchmark: My Active Squad vs Post-Transfer Plan")
             
-        if st.button("🎲 Run Monte Carlo Simulation", type="primary", width='stretch'):
+        if st.button(":material/casino:  Run Monte Carlo Simulation", type="primary", width='stretch'):
             with st.spinner(f"Simulating {n_sims} scenarios..."):
                 odds_map = build_odds_map(conn, selected_gw, fixtures_df, fdr_map)
                 totals, p_dists, stats = run_gameweek_simulation(opt_xi, odds_map, n_sims, captain_id, vc_id)
@@ -464,7 +461,7 @@ def render_simulator_tab(conn, events_df, current_gw):
             
             if sim_res.get("h2h_stats"):
                 h2h = sim_res["h2h_stats"]
-                st.markdown("#### ⚔️ Head-to-Head Comparison")
+                st.markdown("#### :material/swords:  Head-to-Head Comparison")
                 st.info(f"**Primary Squad Win %**: {h2h['win_pct_a']:.1f}% &nbsp; | &nbsp; **Benchmark Win %**: {h2h['win_pct_b']:.1f}% &nbsp; | &nbsp; **Draw %**: {h2h['draw_pct']:.1f}%")
             
             st.markdown("#### Player Contribution Breakdown")
@@ -476,8 +473,8 @@ def render_simulator_tab(conn, events_df, current_gw):
             
             def add_c(row):
                 tag = ""
-                if row["id"] == captain_id: tag = " 🅒"
-                elif row["id"] == vc_id: tag = " 🅥"
+                if row["id"] == captain_id: tag = " :material/looks_one: "
+                elif row["id"] == vc_id: tag = " :material/looks_two: "
                 return row["web_name"] + tag
                 
             df_player_stats["Player"] = df_player_stats.apply(add_c, axis=1)

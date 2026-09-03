@@ -11,27 +11,27 @@ def render_fixture_ticker_tab(conn, current_gw):
     col_t3_hdr, col_t3_pop = st.columns([6, 1])
     with col_t3_hdr:
         section_header(
-            f"Fixture Difficulty · GW{current_gw}–{current_gw + 4}",
+            f"Fixture Difficulty · GW{current_gw}{current_gw + 4}",
             "Upcoming schedule ranked by difficulty",
         )
     with col_t3_pop:
         st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
-        with st.popover("📖 Guide"):
+        with st.popover(":material/menu_book:  Guide"):
             st.markdown(
                 """
                 **Fixture Ticker Guide**
                 
                 * **Difficulty Rating:** Sum of official FDR scores across the next 5 gameweeks.
                 * **(H) vs. (A):** Designates Home or Away fixtures.
-                * 🟢 **Green Run (≤10 pts):** Prime fixture swings.
-                * 🔴 **Tough Run (≥15 pts):** Hold off buying assets from these clubs until their schedule clears.
+                * :material/circle:  **Green Run (10 pts):** Prime fixture swings.
+                * :material/circle:  **Tough Run (15 pts):** Hold off buying assets from these clubs until their schedule clears.
                 """
             )
 
     col_search3, col_sq3 = st.columns([2, 1])
     with col_search3:
         search_query3 = st_keyup(
-            "🔍 Search Player / Club",
+            ":material/search:  Search Player / Club",
             placeholder="e.g. Saka, Arsenal, Haaland, MCI...",
             debounce=250,
             key="tab3_search_keyup",
@@ -40,7 +40,7 @@ def render_fixture_ticker_tab(conn, current_gw):
     with col_sq3:
         st.markdown("<div style='margin-top: 1.8rem;'></div>", unsafe_allow_html=True)
         only_my_squad_tab3 = st.toggle(
-            "🎯 Only My Squad Clubs", key="tab3_only_squad"
+            ":material/my_location:  Only My Squad Clubs", key="tab3_only_squad"
         )
 
     fixtures_query = """
@@ -53,7 +53,7 @@ def render_fixture_ticker_tab(conn, current_gw):
     FROM fixtures f
     INNER JOIN teams th ON f.team_h = th.id
     INNER JOIN teams ta ON f.team_a = ta.id
-    WHERE f.event >= ? AND f.event < ? AND f.finished = 0
+    WHERE f.event >= :material/priority_high: AND f.event < :material/priority_high: AND f.finished = 0
     ORDER BY f.event ASC
     """
     fixtures_df = pd.read_sql(
@@ -85,7 +85,7 @@ def render_fixture_ticker_tab(conn, current_gw):
     if only_my_squad_tab3:
         active_manager_id_tab3 = st.session_state.get("manager_id", "").strip()
         if not active_manager_id_tab3:
-            st.info("💡 Enter your FPL Team ID in the top bar to filter by your squad.")
+            st.info(":material/lightbulb: Enter your FPL Team ID in the top bar to filter by your squad.")
             target_team_short_names = set()
         else:
             squad_ids_tab3 = get_manager_squad_ids(active_manager_id_tab3, current_gw)
@@ -99,30 +99,50 @@ def render_fixture_ticker_tab(conn, current_gw):
                 .to_dict()
             )
 
-    # Precompute club string target containing club names + squad player names
-    all_team_players = (
-        pt_lookup.groupby("short_name")["web_name"]
-        .apply(lambda s: " ".join(s))
-        .to_dict()
-    )
-    club_search_dict = {
-        team: f"{team} {team_name_map.get(team, '')} {all_team_players.get(team, '')}"
-        for team in target_team_short_names
-    }
-
+    # Search Logic: Check exact/partial string matches against individual player names and clubs.
     has_search = bool(search_query3 and search_query3.strip())
     search_relevance_order = {}
 
     if has_search:
-        matches = process.extract(
-            query=search_query3.strip(),
-            choices=club_search_dict,
-            scorer=fuzz.WRatio,
-            score_cutoff=55,
-            limit=20,
-        )
-        if matches:
-            target_team_short_names = [m[2] for m in matches]
+        query_clean = search_query3.strip().lower()
+        team_scores = {}
+        
+        # Build search corpus: [ (search_term, team_id) ]
+        search_choices = []
+        for team in target_team_short_names:
+            search_choices.append((team, team))
+            search_choices.append((team_name_map.get(team, ""), team))
+        for _, row in pt_lookup.iterrows():
+            if row["short_name"] in target_team_short_names:
+                search_choices.append((row["web_name"], row["short_name"]))
+                
+        for term, team in search_choices:
+            term_clean = term.lower()
+            if not term_clean:
+                continue
+                
+            if query_clean == term_clean:
+                score = 100
+            elif query_clean in term_clean.split():
+                score = 95
+            elif term_clean.startswith(query_clean) and len(query_clean) >= 3:
+                score = 90
+            elif query_clean in term_clean and len(query_clean) >= 4:
+                score = 80
+            else:
+                score = fuzz.ratio(query_clean, term_clean)
+                
+            if score >= 60:
+                team_scores[team] = max(team_scores.get(team, 0), score)
+
+        if team_scores:
+            max_score = max(team_scores.values())
+            threshold = max(75, max_score - 5)
+            filtered_teams = {t: s for t, s in team_scores.items() if s >= threshold}
+            
+            # Sort teams by highest score, then alphabet
+            sorted_teams = sorted(filtered_teams.items(), key=lambda x: (-x[1], x[0]))
+            target_team_short_names = [t[0] for t in sorted_teams]
             search_relevance_order = {team: idx for idx, team in enumerate(target_team_short_names)}
         else:
             target_team_short_names = []

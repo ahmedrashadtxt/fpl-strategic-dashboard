@@ -1,0 +1,57 @@
+add_correct_budget.py: ⚡ 🃏 ﻿
+add_pulp.py: ﻿
+add_state_key.py: ﻿
+app.py: ─ 🌙 💡 👉 ✏ ➕ 👤 ● ️ 🌞
+betting_engine.py: ─ ⚪ 🔴 🟢
+cleanup.py: ⚡ 🃏 ⚙ ﻿ ️
+clean_budget.py: ﻿
+complete_fix_simulator.py: ﻿ 🌟
+data.py: ─ 📉 📈 ⚪ 🚀 ️ ⚠
+find_emojis.py: ﻿
+find_nonascii.py: ﻿
+fix_all_tabs.py: ﻿
+fix_budget.py: ⚡ 🃏 ﻿
+fix_col.py: ﻿ 🔒
+fix_import.py: ﻿
+fix_pulp.py: ﻿
+fix_save_btn.py: ﻿ ✅ 💾
+fix_simulator.py: ﻿ 🌟
+fix_sim_banner.py: ﻿
+fix_span.py: ﻿
+fix_span2.py: ⚡ 🃏 ﻿ 🔄
+fix_squad_error.py: ﻿
+fix_squad_scoring.py: ﻿
+fix_ui_squad_analyzer.py: ﻿ 🌟
+optimize_pulp.py: ﻿
+restructure_budget.py: ﻿
+restructure_budget_safely.py: ﻿
+rewrite_controls.py: ⚡ 🌟 🏟 ⚖ 📊 🔒 ﻿ ✅ ️
+rewrite_pulp.py: ﻿
+route_pulp.py: ⚡ 🃏 ﻿
+speedup.py: ﻿
+test_budget.py: ﻿
+test_db.py: ﻿
+test_solver.py: ﻿
+theme.py: ─ ▲ ▼ ⇅ €
+tweak_limits.py: ﻿
+update_app_tabs.py: ﻿
+update_banner.py: ⚡ 🃏 🔄 🎯 ﻿
+update_budget_original.py: ﻿
+update_cache_key.py: ﻿ 🔄
+update_caller.py: ⚡ 🃏 ﻿
+update_caller_again.py: ⚡ 🃏 ﻿
+update_pulp_func.py: ﻿
+update_solver_call.py: ⚡ 🃏 ﻿
+update_tab_order.py: ﻿
+update_transfer_pulp.py: ﻿
+update_ui.py: ⚡ 🃏 ⚙ – ﻿ ️
+audit_journal.py: — ⏳ 🎖 🔴 ✅ 🔄 🏟 🔒 📜 ─ 🛡 👆 📊 🔬 ⭐ 👑 ️ 📋 🟢
+defensive_stats.py: — 🎯 💡 📖 ️ 🔍 ⏱ 🏛
+expected_stats.py: ─ — 🎯 💡 📖 ️ 🔍 ⏱ 🏛
+fixture_ticker.py: — 🎯 💡 🔴 – 📖 🔍 ≥ ≤ 🟢
+rolling_form.py: ─ 🎯 💡 📖 ️ 🔍 ⚠
+simulator.py: ─ 🎯 🔄 🛠 🌟 ⚙ 🎲 🅥 ⚔ 🅒 👤 ️ 📋
+squad_analyzer.py: — 📉 👤 ✅ 🔄 🏟 🔒 ⚡ 👆 📊 📈 🌟 ⚖ 🪑 📖 👑 ️ ⚠ 📰 📅
+transfer_analyzer.py: — 💾 📉 🔴 ⚙ 👤 ⛔ ✅ ❌ 🔄 🏟 🔒 → 🚀 ─ 🃏 ⚡ 👆 📊 – ⏱ 🎯 📈 ⚖ 🪑 👥 ️ ⚠ 📋 • 🟢
+transfer_market.py: 🚫 🔍 📊 📖
+__init__.py: ﻿

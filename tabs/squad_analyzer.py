@@ -166,7 +166,7 @@ def build_player_tooltip(p: pd.Series, is_live: bool = False) -> str:
     news_row = ""
     if status != "a" and news and news != "None":
         clean_news = html.escape(news[:40] + ("..." if len(news) > 40 else ""))
-        news_row = f'<div class="tt-row tt-news"><span>⚠️ {clean_news}</span></div>'
+        news_row = f'<div class="tt-row tt-news"><span>:material/warning:  {clean_news}</span></div>'
 
     return (
         f'<div class="player-tooltip-card">'
@@ -318,9 +318,9 @@ def quick_sync_live_prices(conn):
             cursor.executemany(
                 """
                 UPDATE players 
-                SET now_cost = ?, status = ?, news = ?, chance_of_playing_next_round = ?,
-                    total_points = ?, form = ?, points_per_game = ?
-                WHERE id = ?
+                SET now_cost = :material/priority_high:, status = :material/priority_high:, news = :material/priority_high:, chance_of_playing_next_round = :material/priority_high:,
+                    total_points = :material/priority_high:, form = :material/priority_high:, points_per_game = :material/priority_high:
+                WHERE id = :material/priority_high:
                 """,
                 [
                     (
@@ -468,7 +468,7 @@ def apply_market_projection_with_movement(
             "Market xG": round(mkt_team_xg, 2),
             "Diff": f"{diff:+.2f}",
             "CS Prob": f"{int(mkt_cs_prob * 100)}%",
-            "Verdict": "Market Bullish 📈" if diff > 0 else "Market Bearish 📉",
+            "Verdict": "Market Bullish :material/trending_up: " if diff > 0 else "Market Bearish :material/trending_down: ",
         }
 
     move_item = {
@@ -491,7 +491,7 @@ def find_best_chip_gw(chip_type: str, squad_df: pd.DataFrame, conn, next_gw_id: 
         """
         SELECT event, team_h, team_a, team_h_difficulty, team_a_difficulty
         FROM fixtures
-        WHERE event >= ? AND event <= 19
+        WHERE event >= :material/priority_high: AND event <= 19
         """,
         conn,
         params=[next_gw_id],
@@ -629,7 +629,7 @@ def get_cached_league_eval_df(
         FROM fixtures f
         INNER JOIN teams th ON f.team_h = th.id
         INNER JOIN teams ta ON f.team_a = ta.id
-        WHERE f.event >= ? AND f.event <= ?
+        WHERE f.event >= :material/priority_high: AND f.event <= :material/priority_high:
         """,
         _conn,
         params=[current_gw, max(19, selected_eval_gw)],
@@ -958,7 +958,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             "Audit live lineup & solve optimal starting XI for future gameweeks",
         )
     with col_t4_pop:
-        with st.popover("📖 Guide"):
+        with st.popover(":material/menu_book:  Guide"):
             st.markdown(
                 """
                 **Squad Sync & Optimizer Guide**
@@ -974,7 +974,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
     mgr_to_use = st.session_state.get("manager_id", "").strip()
 
     if not mgr_to_use:
-        st.info("👆 Click 'Enter FPL ID' in the top-right header to load your squad analysis.")
+        st.info(":material/arrow_upward:  Click 'Enter FPL ID' in the top-right header to load your squad analysis.")
         return
 
     try:
@@ -1016,7 +1016,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             st.warning("No squad picks found for this manager.")
             return
 
-        placeholders = ",".join(["?"] * len(pick_ids))
+        placeholders = ",".join([":material/priority_high:"] * len(pick_ids))
         squad_query = f"""
         SELECT
             p.id, p.code, p.photo, p.web_name AS Player, p.team AS team_id,
@@ -1109,7 +1109,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
         col_gw_sel, col_gw_ref = st.columns([6.2, 0.8], vertical_alignment="center")
         with col_gw_sel:
             selected_eval_gw = st.radio(
-                "📅 **Select Gameweek:**",
+                ":material/calendar_month:  **Select Gameweek:**",
                 options=all_gw_options,
                 index=default_idx,
                 format_func=format_gw_label,
@@ -1118,7 +1118,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             )
 
         with col_gw_ref:
-            if st.button("🔄 Refresh", use_container_width=True, help="Sync prices, chip status, and odds snapshots"):
+            if st.button(":material/sync:  Refresh", use_container_width=True, help="Sync prices, chip status, and odds snapshots"):
                 fetch_manager_entry.clear()
                 fetch_manager_history.clear()
                 fetch_manager_picks.clear()
@@ -1134,23 +1134,23 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                     quick_sync_live_prices(conn)
                     odds_key = st.secrets.get("ODDS_API_KEY", os.getenv("ODDS_API_KEY", ""))
                     sync_fixture_odds_snapshots(conn, odds_key)
-                st.toast("Dashboard & odds synced!", icon="⚡")
+                st.toast("Dashboard & odds synced!", icon=":material/bolt: ")
                 st.rerun()
 
         
-        col_tgl1, col_tgl2, col_tgl3, col_tgl4 = st.columns([1.5, 1.6, 1.6, 3.5], vertical_alignment="center")
+        col_tgl1, col_tgl2, col_tgl3, col_tgl4, col_pad = st.columns([1.3, 1.4, 1.4, 3.0, 3.5], vertical_alignment="center")
         with col_tgl1:
-            pitch_view = st.toggle("🏟️ **Pitch View**", value=True, key="tab4_pitch_toggle")
+            pitch_view = st.toggle(":material/stadium: **Pitch View**", value=True, key="tab4_pitch_toggle")
         with col_tgl2:
-            enable_comparison = st.toggle("⚖️ **Comparison**", value=False, key="tab4_compare_toggle")
+            enable_comparison = st.toggle(":material/balance:  **Comparison**", value=False, key="tab4_compare_toggle")
             
         super_team_mode = False
         with col_tgl3:
             if enable_comparison:
-                super_team_mode = st.toggle("🌟 **Super Team**", value=False, key="tab4_super_team_toggle")
+                super_team_mode = st.toggle(":material/star:  **Super Team**", value=False, key="tab4_super_team_toggle")
                 
         with col_tgl4:
-            enable_betting = st.toggle("📊 **Betting Market xG**", value=True, key="tab4_enable_betting")
+            enable_betting = st.toggle(":material/bar_chart:  **Betting Market xG**", value=True, key="tab4_enable_betting")
             market_weight = 0.35
             factor_movement = True
             if enable_betting:
@@ -1167,7 +1167,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                         help="0.0 = 100% Model | 1.0 = 100% Betting Odds",
                     )
                 with col_m2:
-                    factor_movement = st.checkbox("⚡ Line Movement", value=True, key="tab4_factor_movement")
+                    factor_movement = st.checkbox(":material/bolt:  Line Movement", value=True, key="tab4_factor_movement")
 
         # BELOW the row: Lock Lineup
         existing_snap = get_snapshot(conn, next_gw_id) if selected_eval_gw == next_gw_id else None
@@ -1178,7 +1178,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             col_lock_btn, col_lock_info = st.columns([2.0, 8.0], vertical_alignment="center")
             
             with col_lock_btn:
-                btn_label = "🔒 Re-Lock Lineup" if snap_locked else "🔒 Lock In Starting XI"
+                btn_label = ":material/lock:  Re-Lock Lineup" if snap_locked else ":material/lock:  Lock In Starting XI"
                 if st.button(btn_label, key=f"commit_gw_{selected_eval_gw}", use_container_width=True):
                     full_lineup_df = pd.concat([optimal_xi, optimal_bench], ignore_index=True)
                     lineup_records = full_lineup_df.to_dict(orient="records")
@@ -1192,13 +1192,13 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                         market_weight=market_weight if enable_betting else 0.0,
                         factor_movement=factor_movement if enable_betting else False,
                     )
-                    st.toast(f"GW{selected_eval_gw} optimal lineup committed to Audit Journal!", icon="✅")
+                    st.toast(f"GW{selected_eval_gw} optimal lineup committed to Audit Journal!", icon=":material/check_circle: ")
                     st.rerun()
                     
             with col_lock_info:
                 if snap_locked:
                     lock_time = existing_snap.get("created_at", "")[:16].replace("T", " ")
-                    st.markdown(f"<span style='color:#22c55e; font-size:0.85rem; font-weight:600;'>✅ Locked at {lock_time}</span>", unsafe_allow_html=True)
+                    st.markdown(f"<span style='color:#22c55e; font-size:0.85rem; font-weight:600;'>:material/check_circle:  Locked at {lock_time}</span>", unsafe_allow_html=True)
         
         is_finished_gw = selected_eval_gw in finished_gw_ids
         is_ongoing_gw = (selected_eval_gw == ongoing_gw)
@@ -1245,7 +1245,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
 
             if enable_comparison and comp_data:
                 comp_pick_ids = [p["element"] for p in comp_data["picks"]]
-                comp_placeholders = ",".join(["?"] * len(comp_pick_ids))
+                comp_placeholders = ",".join([":material/priority_high:"] * len(comp_pick_ids))
                 comp_df = pd.read_sql(
                     squad_query.replace(placeholders, comp_placeholders),
                     conn,
@@ -1293,7 +1293,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                     st.markdown(
                         f"""
                         <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">👤 Your Squad · GW{selected_eval_gw}</span>
+                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">:material/person:  Your Squad · GW{selected_eval_gw}</span>
                             <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({user_eval_pts} pts)</span>
                         </div>
                         """,
@@ -1310,7 +1310,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                     st.markdown(
                         f"""
                         <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">👑 {comp_title}</span>
+                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">:material/emoji_events:  {comp_title}</span>
                             <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({comp_pts} pts)</span>
                         </div>
                         """,
@@ -1327,7 +1327,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 st.markdown(
                     f"""
                     <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px;">
-                        <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">👤 Your Squad · GW{selected_eval_gw}</span>
+                        <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">:material/person:  Your Squad · GW{selected_eval_gw}</span>
                         <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({user_eval_pts} pts)</span>
                     </div>
                     """,
@@ -1358,7 +1358,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             FROM fixtures f
             INNER JOIN teams th ON f.team_h = th.id
             INNER JOIN teams ta ON f.team_a = ta.id
-            WHERE f.event >= ? AND f.event <= ?
+            WHERE f.event >= :material/priority_high: AND f.event <= :material/priority_high:
             """
             adv_fix_df = pd.read_sql(adv_fixtures_query, conn, params=[current_gw, max(19, selected_eval_gw)])
             hist_baselines_df = get_historical_player_baselines(conn)
@@ -1474,13 +1474,13 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                         conn, current_gw, selected_eval_gw, enable_betting, market_weight, factor_movement
                     )
                     comp_target_label = "Super Team"
-                    comp_badge_icon = "👑"
+                    comp_badge_icon = ":material/emoji_events: "
                 else:
                     comp_xi, comp_bench, comp_formation = get_cached_league_dream_15(
                         conn, current_gw, selected_eval_gw, total_team_value, enable_betting, market_weight, factor_movement
                     )
                     comp_target_label = "Budget Dream 11"
-                    comp_badge_icon = "🌟"
+                    comp_badge_icon = ":material/star: "
 
                 comp_xi["is_cap"] = False
                 comp_xi["is_vc"] = False
@@ -1542,7 +1542,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                     st.markdown(
                         f"""
                         <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">👤 Your Optimal XI · GW{selected_eval_gw}</span>
+                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">:material/person:  Your Optimal XI · GW{selected_eval_gw}</span>
                             <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({optimal_formation} · {user_proj_xi_pts:.1f} xP)</span>
                         </div>
                         """,
@@ -1574,7 +1574,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                                 img_url=get_player_img_url(row.get("photo"), row.get("code")),
                             )
                         if not optimal_bench.empty:
-                            st.markdown("##### 🪑 Projected Bench")
+                            st.markdown("##### :material/chair:  Projected Bench")
                             for idx, (_, row) in enumerate(optimal_bench.iterrows()):
                                 sub_label = "Sub GKP" if row["Pos"] == "GKP" else f"Sub {idx}"
                                 render_list_card(
@@ -1618,7 +1618,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                                 img_url=get_player_img_url(row.get("photo"), row.get("code")),
                             )
                         if not comp_bench.empty:
-                            st.markdown("##### 🪑 Dream Bench")
+                            st.markdown("##### :material/chair:  Dream Bench")
                             for idx, (_, row) in enumerate(comp_bench.iterrows()):
                                 sub_label = "Sub GKP" if row["Pos"] == "GKP" else f"Sub {idx}"
                                 render_list_card(
@@ -1631,17 +1631,17 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 if enable_betting:
                     st.markdown("<br>", unsafe_allow_html=True)
                     if disagreements:
-                        st.markdown("#### ⚖️ Model vs Market Disagreements")
+                        st.markdown("#### :material/balance:  Model vs Market Disagreements")
                         unique_d = {v["Club"]: v for v in disagreements}.values()
                         st.dataframe(pd.DataFrame(unique_d), hide_index=True, use_container_width=True)
 
                     if movements:
-                        st.markdown("#### ⚡ Market Line Movement (Opening vs Current)")
+                        st.markdown("#### :material/bolt:  Market Line Movement (Opening vs Current)")
                         unique_m = {v["Club"]: v for v in movements}.values()
                         st.dataframe(pd.DataFrame(unique_m), hide_index=True, use_container_width=True)
 
                 st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("#### 📰 Squad News & Availability")
+                st.markdown("#### :material/newspaper:  Squad News & Availability")
                 flagged = squad_df[squad_df["Status"] != "a"]
                 if flagged.empty:
                     st.success("All squad players available.")
@@ -1655,7 +1655,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                     st.markdown(
                         f"""
                         <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">👤 Optimal Starting XI · GW{selected_eval_gw}</span>
+                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">:material/person:  Optimal Starting XI · GW{selected_eval_gw}</span>
                             <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({optimal_formation} · {user_proj_xi_pts:.1f} xP)</span>
                         </div>
                         """,
@@ -1687,7 +1687,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                                 img_url=get_player_img_url(row.get("photo"), row.get("code")),
                             )
                         if not optimal_bench.empty:
-                            st.markdown("##### 🪑 Projected Bench")
+                            st.markdown("##### :material/chair:  Projected Bench")
                             for idx, (_, row) in enumerate(optimal_bench.iterrows()):
                                 sub_label = "Sub GKP" if row["Pos"] == "GKP" else f"Sub {idx}"
                                 render_list_card(
@@ -1700,16 +1700,16 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 with col_side:
                     if enable_betting:
                         if disagreements:
-                            st.markdown("#### ⚖️ Model vs Market")
+                            st.markdown("#### :material/balance:  Model vs Market")
                             unique_d = {v["Club"]: v for v in disagreements}.values()
                             st.dataframe(pd.DataFrame(unique_d), hide_index=True, use_container_width=True)
 
                         if movements:
-                            st.markdown("#### ⚡ Line Movement (Open vs Now)")
+                            st.markdown("#### :material/bolt:  Line Movement (Open vs Now)")
                             unique_m = {v["Club"]: v for v in movements}.values()
                             st.dataframe(pd.DataFrame(unique_m), hide_index=True, use_container_width=True)
 
-                    st.markdown("#### 📰 Squad News")
+                    st.markdown("#### :material/newspaper:  Squad News")
                     flagged = squad_df[squad_df["Status"] != "a"]
                     if flagged.empty:
                         st.success("All squad players available.")

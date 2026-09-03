@@ -23,8 +23,8 @@ def get_player_img_url(photo, code=None):
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def fetch_defensive_base_data(_conn):
-    """Fetches all player records and precomputes defensive metrics once to prevent keystroke lag."""
+def fetch_defensive_base_data(_conn, current_gw: int = 1):
+    """Fetches player defensive records and precomputes absolute gameweek projected defensive xP."""
     player_cols = [
         c.lower()
         for c in pd.read_sql("PRAGMA table_info(players)", _conn)["name"].tolist()
@@ -158,6 +158,8 @@ def fetch_defensive_base_data(_conn):
         p.clean_sheets AS Clean_Sheets,
         p.goals_conceded AS Goals_Conceded,
         p.saves AS Saves,
+        p.status AS Status,
+        p.chance_of_playing_next_round AS Chance,
         {xgc_expr},
         {xgc_90_expr},
         {t_expr},
@@ -196,6 +198,78 @@ def fetch_defensive_base_data(_conn):
         df_def["xGC_per_90"] = (
             (df_def["xGC"] / df_def["Minutes"].replace(0, pd.NA)) * 90.0
         ).fillna(0.0).round(2)
+
+    completed_gws = max(1, current_gw - 1)
+    df_def["Avg_Mins_GW"] = (df_def["Minutes"] / completed_gws).round(1)
+
+    def calc_def_xp(row):
+        etype = int(row.get("element_type", 2))
+        mins = float(row.get("Minutes", 0))
+        career_gc = row.get("Career_GC_90")
+        avg_mins = float(row.get("Avg_Mins_GW", 0))
+
+        raw_xgc90 = float(row.get("xGC_per_90", 0))
+        if raw_xgc90 <= 0:
+            raw_xgc90 = 1.35
+
+        if mins < 90:
+            baseline_gc = (
+                float(career_gc)
+                if pd.notna(career_gc) and float(career_gc) > 0
+                else 1.35
+            )
+            weight = mins / 90.0
+            xgc90 = (raw_xgc90 * weight) + (baseline_gc * (1.0 - weight))
+        else:
+            xgc90 = raw_xgc90
+
+        cs_prob = np.exp(-xgc90)
+        saves90 = float(row.get("Saves_per_90", 0))
+
+        # Expected match playing time and clean sheet 60-minute eligibility
+        if current_gw > 1:
+            if avg_mins >= 60:
+                mins_factor = min(1.0, avg_mins / 90.0)
+                cs_eligible = 1.0
+            elif avg_mins >= 30:
+                mins_factor = (avg_mins / 90.0) * 0.85
+                cs_eligible = 0.40
+            elif mins > 0:
+                mins_factor = max(0.05, mins / (completed_gws * 90.0))
+                cs_eligible = 0.05
+            else:
+                mins_factor = 0.85 if float(row.get("Price", 0)) >= 5.0 else 0.35
+                cs_eligible = 0.85 if float(row.get("Price", 0)) >= 5.0 else 0.35
+        else:
+            mins_factor = 0.85 if float(row.get("Price", 0)) >= 5.0 else 0.60
+            cs_eligible = 0.85 if float(row.get("Price", 0)) >= 5.0 else 0.60
+
+        status = str(row.get("Status", "a"))
+        chance = row.get("Chance")
+        if status in ("i", "u", "s"):
+            avail = 0.0
+        elif pd.notna(chance) and str(chance).strip() not in ("", "None"):
+            avail = float(chance) / 100.0
+        else:
+            avail = 1.0
+
+        if etype == 1:
+            cs_pts = cs_prob * 4.0 * cs_eligible
+            gc_deduction = (xgc90 * mins_factor) * 0.50
+            save_pts = (saves90 * mins_factor) / 3.0
+            net_def_xp = cs_pts - gc_deduction + save_pts
+        elif etype == 2:
+            cs_pts = cs_prob * 4.0 * cs_eligible
+            gc_deduction = (xgc90 * mins_factor) * 0.50
+            net_def_xp = cs_pts - gc_deduction
+        elif etype == 3:
+            net_def_xp = cs_prob * 1.0 * cs_eligible
+        else:
+            net_def_xp = 0.0
+
+        dc90 = float(row.get("DC_per_90", 0))
+        dc_boost = (0.40 if dc90 >= 10.0 else (0.20 if dc90 >= 7.0 else 0.0)) * mins_factor
+        return round(max(0.0, (net_def_xp + dc_boost) * avail), 2)
 
     def calc_def_xp_90(row):
         etype = int(row.get("element_type", 2))
@@ -239,11 +313,11 @@ def fetch_defensive_base_data(_conn):
         return round(max(0.1, net_def_xp + dc_boost), 2)
 
     if not df_def.empty:
+        df_def["Proj_Defensive_xP"] = df_def.apply(calc_def_xp, axis=1)
         df_def["Proj_Defensive_xP_90"] = df_def.apply(calc_def_xp_90, axis=1)
         df_def = df_def.dropna(subset=["Player"])
         df_def = df_def[df_def["Player"].astype(str).str.strip() != ""]
 
-        # Precompute string search target for rapid fuzzy lookup
         df_def["_search_target"] = (
             df_def["Player"].fillna("")
             + " "
@@ -267,29 +341,30 @@ def render_defensive_stats_tab(conn, current_gw):
         )
     with col_def_pop:
         st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
-        with st.popover("📖 Guide"):
+        with st.popover(":material/menu_book:  Guide"):
             st.markdown(
                 """
                 **Defensive Expected Points Guide**
                 
-                * **Proj Def xP/90:** Estimated defensive expected points derived from clean sheet probability ($P(\\text{CS}) \\times 4$ for DEF/GKP, $\\times 1$ for MID), goal concession deductions ($-0.5 \\times xGC$ for DEF/GKP), and goalkeeper saves ($+1$ per 3 saves).
+                * **Proj Def xP:** Absolute defensive expected points for the upcoming match derived from clean sheet probability ($P(\\text{CS}) \\times 4$ for DEF/GKP, $\\times 1$ for MID), goal concession deductions ($-0.5 \\times xGC$), goalkeeper saves ($+1$ per 3 saves), and playing time probability.
+                * **Min Avg Mins / GW:** Filters out fringe and cameo assets to focus on regular starting defenders/goalkeepers.
                 * **DC (Defensive Contributions):** Cumulative actions tracked for the +2 DC match bonus point threshold (Clearances, Blocks, Interceptions, Tackles).
-                * **Price Filter:** Use the range slider to isolate defenders and goalkeepers within your target price bracket.
                 * **Sample Regression:** Small early-season minute samples (<90 mins) are automatically blended with career baselines to prevent sample noise.
                 """
             )
 
-    col_search, col1, col2, col3 = st.columns([1.5, 1, 1, 1])
+    col_search, col1, col2, col3 = st.columns([1.4, 1.2, 1, 1.2])
     with col_search:
         search_query = st_keyup(
-            "🔍 Search Player / Club",
+            ":material/search:  Search Player / Club",
             placeholder="e.g. Gabriel, Raya, Saliba, ARS...",
             debounce=250,
             key="def_search_keyup",
         )
     with col1:
-        min_minutes = st.slider(
-            "Minimum Minutes Played", 0, 900, 0, step=45, key="def_min_mins"
+        min_avg_mins = st.slider(
+            ":material/timer:  Min Avg Mins / GW", 0, 90, 0, step=5, key="def_min_avg_mins",
+            help="Filter players by average minutes played per gameweek",
         )
     with col2:
         position_filter = st.selectbox(
@@ -299,9 +374,10 @@ def render_defensive_stats_tab(conn, current_gw):
         sort_by = st.selectbox(
             "Rank By",
             [
-                "Projected Defensive xP / 90",
+                "Projected Defensive xP",
                 "DC per 90",
                 "Total DC",
+                "Projected Defensive xP / 90",
                 "CBI (Clearances, Blocks, Int)",
                 "Tackles (T)",
                 "Recoveries (R)",
@@ -320,40 +396,37 @@ def render_defensive_stats_tab(conn, current_gw):
         )
     with col_toggle1:
         only_my_squad_tab = st.toggle(
-            "🎯 Only My Squad Players", key="def_only_squad"
+            ":material/my_location:  Only My Squad Players", key="def_only_squad"
         )
     with col_toggle2:
         show_career_baseline = st.toggle(
-            "🏛️ Show Career Baselines (Past Seasons)", value=False, key="def_show_career"
+            ":material/account_balance:  Show Career Baselines (Past Seasons)", value=False, key="def_show_career"
         )
 
-    # 1. Fetch cached base dataset (runs in <1ms on reruns)
-    df_raw = fetch_defensive_base_data(conn)
+    df_raw = fetch_defensive_base_data(conn, current_gw)
     if df_raw.empty:
         st.info("No player data available.")
         return
 
-    # 2. Filter in memory
     filtered_df = df_raw.copy()
 
     if position_filter != "All":
         filtered_df = filtered_df[filtered_df["Pos"] == position_filter]
 
     filtered_df = filtered_df[
-        (filtered_df["Minutes"] >= min_minutes)
+        (filtered_df["Avg_Mins_GW"] >= min_avg_mins)
         & (filtered_df["Price"] <= max_price_filter_def)
     ]
 
     active_manager_id = st.session_state.get("manager_id", "").strip()
     if only_my_squad_tab and not filtered_df.empty:
         if not active_manager_id:
-            st.info("💡 Enter your FPL Team ID in the top bar to filter by your squad.")
+            st.info(":material/lightbulb: Enter your FPL Team ID in the top bar to filter by your squad.")
             filtered_df = filtered_df.iloc[0:0]
         else:
             squad_ids = get_manager_squad_ids(active_manager_id, current_gw)
             filtered_df = filtered_df[filtered_df["element_id"].isin(squad_ids)]
 
-    # 3. RapidFuzz Search Matching & Relevance Ordering
     has_search = bool(search_query and search_query.strip())
 
     if has_search and not filtered_df.empty:
@@ -376,9 +449,10 @@ def render_defensive_stats_tab(conn, current_gw):
 
     elif not filtered_df.empty:
         sort_map = {
-            "Projected Defensive xP / 90": ("Proj_Defensive_xP_90", False),
+            "Projected Defensive xP": ("Proj_Defensive_xP", False),
             "DC per 90": ("DC_per_90", False),
             "Total DC": ("DC", False),
+            "Projected Defensive xP / 90": ("Proj_Defensive_xP_90", False),
             "CBI (Clearances, Blocks, Int)": ("CBI", False),
             "Tackles (T)": ("T", False),
             "Recoveries (R)": ("R", False),
@@ -394,12 +468,11 @@ def render_defensive_stats_tab(conn, current_gw):
         st.info("No players found matching your filters.")
         return
 
-    # 4. Render top hero cards
     top_cards = filtered_df.head(min(4, len(filtered_df)))
     card_cols = st.columns(len(top_cards))
     for i, (_, row) in enumerate(top_cards.iterrows()):
-        proj_def_xp = float(row["Proj_Defensive_xP_90"])
-        def_xp_tag = (f"Proj {proj_def_xp:.2f} def xP/90", "blue")
+        proj_def_xp = float(row["Proj_Defensive_xP"])
+        def_xp_tag = (f"Proj {proj_def_xp:.2f} def xP", "blue")
 
         with card_cols[i]:
             c_cs = row.get("Career_CS_90")
@@ -412,15 +485,15 @@ def render_defensive_stats_tab(conn, current_gw):
             render_list_card(
                 f"{row['Player']} ({row['Team']})",
                 [(row["Pos"], "blue"), def_xp_tag],
-                f'<span>Price</span> £{fmt_num(row["Price"], ".1f")} · <span>xGC</span>'
+                f'<span>Price</span> £{fmt_num(row["Price"], ".1f")} · <span>Avg M/GW</span>'
+                f' {int(row["Avg_Mins_GW"])}m · <span>xGC</span>'
                 f' {fmt_num(row["xGC"])} · <span>DC/90</span>'
                 f' {fmt_num(row["DC_per_90"])} · <span>Pts</span>'
-                f' {int(float(row["Total_Points"]))} · <span>Def xP/90</span>'
+                f' {int(float(row["Total_Points"]))} · <span>Def xP</span>'
                 f' {fmt_num(proj_def_xp, ".2f")}{hist_note}',
                 img_url=card_img,
             )
 
-    # 5. Table styling & construction
     is_dark = st.session_state.get("theme_mode", "dark") == "dark"
 
     theme_styles = f"""
@@ -513,8 +586,8 @@ def render_defensive_stats_tab(conn, current_gw):
     display_df = filtered_df.head(35)
     html_out = [theme_styles, '<div class="unified-table-wrapper"><table class="unified-table"><thead><tr>']
     html_out.append('<th style="text-align: left; padding-left: 1rem;">Player</th>')
-    html_out.append('<th>Club</th><th>Pos</th><th>Price</th><th>Mins</th><th>Pts</th><th>CS</th><th>GC</th>')
-    html_out.append('<th>xGC</th><th>Proj Def xP/90</th><th>xGC/90</th><th>DC</th><th>DC/90</th><th>CBI</th><th>R</th><th>T</th><th>Saves</th><th>Saves/90</th>')
+    html_out.append('<th>Club</th><th>Pos</th><th>Price</th><th>Mins</th><th>Avg M/GW</th><th>Pts</th><th>CS</th><th>GC</th>')
+    html_out.append('<th>xGC</th><th>Proj Def xP</th><th>xGC/90</th><th>DC</th><th>DC/90</th><th>CBI</th><th>R</th><th>T</th><th>Saves</th><th>Saves/90</th>')
 
     if show_career_baseline:
         html_out.append('<th>Career GC/90</th><th>Career CS/90</th><th>Career Pts/90</th><th>Career Mins</th>')
@@ -523,7 +596,7 @@ def render_defensive_stats_tab(conn, current_gw):
 
     for _, row in display_df.iterrows():
         p_img = get_player_img_url(row.get("photo"), row.get("code"))
-        proj_def_xp = float(row["Proj_Defensive_xP_90"])
+        proj_def_xp = float(row["Proj_Defensive_xP"])
 
         html_out.append("<tr>")
         html_out.append(
@@ -537,6 +610,7 @@ def render_defensive_stats_tab(conn, current_gw):
         html_out.append(f'<td><span class="pos-pill pos-{row["Pos"]}">{row["Pos"]}</span></td>')
         html_out.append(f'<td>£{row["Price"]:.1f}</td>')
         html_out.append(f'<td>{int(row["Minutes"]):,}</td>')
+        html_out.append(f'<td>{int(row["Avg_Mins_GW"])}m</td>')
         html_out.append(f'<td style="font-weight: 700;">{int(row["Total_Points"])}</td>')
         html_out.append(f'<td>{int(row["Clean_Sheets"])}</td>')
         html_out.append(f'<td>{int(row["Goals_Conceded"])}</td>')

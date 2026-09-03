@@ -1,6 +1,5 @@
 import html
 import streamlit as st
-import streamlit.components.v1 as components
 
 SILHOUETTE_BASE64 = (
     "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmci"
@@ -77,6 +76,135 @@ html, body, [class*="css"] {{
     background: {bg_app} !important;
     color: {text_main} !important;
 }}
+
+{"" if is_dark else f"""
+/* ── LIGHT MODE: Override Streamlit's baked-in dark CSS variables ── */
+/* config.toml forces base=dark; these rules override every widget that
+   resolves var(--text-color) or var(--background-color) to dark values */
+.stApp, .stApp * {{
+    --text-color: {text_main} !important;
+    --background-color: {bg_app} !important;
+    --secondary-background-color: {bg_card} !important;
+}}
+
+/* Force all block/markdown containers light */
+.stApp [data-testid="stVerticalBlock"],
+.stApp [data-testid="stHorizontalBlock"],
+.stApp [data-testid="stMarkdownContainer"],
+.stApp [data-testid="stElementContainer"],
+.stApp [data-testid="element-container"],
+.stApp [data-testid="stMain"],
+.stApp [data-testid="stMainBlockContainer"] {{
+    background: transparent !important;
+    color: {text_main} !important;
+}}
+
+/* Markdown text */
+.stApp [data-testid="stMarkdownContainer"] p,
+.stApp [data-testid="stMarkdownContainer"] span,
+.stApp [data-testid="stMarkdownContainer"] li,
+.stApp [data-testid="stMarkdownContainer"] td,
+.stApp [data-testid="stMarkdownContainer"] th {{
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+}}
+
+/* Tab button text: was white-on-white because var(--text-color) = #f5f5f5 */
+.stApp [data-baseweb="tab-list"] button p,
+.stApp [data-baseweb="tab-list"] button span,
+.stApp [data-testid="stTabs"] button p,
+.stApp [data-testid="stTabs"] button span {{
+    -webkit-text-fill-color: #475569 !important;
+}}
+
+/* Multiselect/select dropdown backgrounds */
+.stApp [data-baseweb="select"] > div,
+.stApp [data-baseweb="select"] > div > div,
+.stApp div[data-baseweb="popover"] [role="listbox"],
+.stApp ul[role="listbox"] {{
+    background-color: {bg_card} !important;
+    border-color: {input_border} !important;
+}}
+
+/* Select option text */
+.stApp [data-baseweb="select"] [class*="ValueContainer"] *,
+.stApp [data-baseweb="select"] [class*="singleValue"],
+.stApp [data-baseweb="select"] [class*="placeholder"],
+.stApp [data-baseweb="select"] input,
+.stApp [data-baseweb="menu"] [role="option"],
+.stApp ul[role="listbox"] li {{
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+    background-color: transparent !important;
+}}
+
+/* Multiselect tag pills */
+.stApp [data-testid="stMultiSelect"] [data-baseweb="tag"] {{
+    background-color: {tag_gray_bg} !important;
+    border: 1px solid {tag_gray_border} !important;
+}}
+.stApp [data-testid="stMultiSelect"] [data-baseweb="tag"] span {{
+    color: {tag_gray_txt} !important;
+    -webkit-text-fill-color: {tag_gray_txt} !important;
+}}
+
+/* Selectbox/number_input backgrounds */
+.stApp [data-testid="stSelectbox"] > div > div,
+.stApp [data-testid="stNumberInput"] > div > div {{
+    background-color: {input_bg} !important;
+    border-color: {input_border} !important;
+    color: {text_main} !important;
+}}
+
+/* Number input text */
+.stApp [data-testid="stNumberInput"] input {{
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+    background: transparent !important;
+}}
+
+/* Popovers */
+.stApp div[data-testid="stPopoverBody"],
+.stApp [data-baseweb="popover"] > div {{
+    background-color: {bg_card} !important;
+    border: 1px solid {input_border} !important;
+    color: {text_main} !important;
+}}
+.stApp div[data-testid="stPopoverBody"] *,
+.stApp [data-baseweb="popover"] > div * {{
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+}}
+
+/* St.info / st.success / st.warning / st.error banners */
+.stApp [data-testid="stAlert"] {{
+    background-color: {bg_card} !important;
+    border-color: {input_border} !important;
+}}
+.stApp [data-testid="stAlert"] p,
+.stApp [data-testid="stAlert"] span {{
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+}}
+
+/* Dataframe/table */
+.stApp [data-testid="stDataFrame"] {{
+    background-color: {bg_card} !important;
+}}
+
+/* Slider track and thumb */
+.stApp [data-baseweb="slider"] [data-testid="stThumbValue"],
+.stApp [data-baseweb="slider"] p {{
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+}}
+
+/* Caption text */
+.stApp [data-testid="stCaptionContainer"] p {{
+    color: {text_meta} !important;
+    -webkit-text-fill-color: {text_meta} !important;
+}}
+"""}
 
 #MainMenu, footer, header[data-testid="stHeader"] {{
     display: none !important;
@@ -220,9 +348,9 @@ div[data-testid="stHorizontalBlock"] {{
 
 /* ── THEME BUTTON EXCLUSIVE STYLING ── */
 div[data-testid="column"] div[data-testid="stButton"] button {{
-    background-color: var(--secondary-background-color) !important;
-    color: var(--text-color) !important;
-    border: 1px solid #d1d5db !important;
+    background-color: {bg_card} !important;
+    color: {text_main} !important;
+    border: 1px solid {button_border} !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -311,8 +439,8 @@ div[data-testid="column"] div[data-testid="stButton"] button:hover {{
 
 .stApp [data-baseweb="tab-list"] button[aria-selected="false"]:hover *,
 .stApp [data-testid="stTabs"] button[aria-selected="false"]:hover * {{
-    color: var(--text-color) !important;
-    -webkit-text-fill-color: var(--text-color) !important;
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
 }}
 
 .stApp [data-baseweb="tab-list"] button[aria-selected="true"] *,
@@ -589,27 +717,58 @@ div[data-testid="column"] div[data-testid="stButton"] button:hover {{
 }}
 
 [data-testid="stExpanderDetails"] {{
-    background-color: var(--secondary-background-color) !important;
-    color: var(--text-color) !important;
+    background-color: {bg_card} !important;
+    color: {text_main} !important;
     border-radius: 0 0 0.5rem 0.5rem;
 }}
 [data-testid="stExpanderDetails"] * {{
-    color: var(--text-color) !important;
-    -webkit-text-fill-color: var(--text-color) !important;
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
 }}
 
 div[data-baseweb="select"] > div {{
-    background-color: var(--background-color) !important;
-    border-color: #cbd5e1 !important;
+    background-color: {input_bg} !important;
+    border-color: {input_border} !important;
 }}
 div[data-baseweb="select"] div[class*="singleValue"] {{
-    color: var(--text-color) !important;
+    color: {text_main} !important;
 }}
 ul[role="listbox"] {{
-    background-color: var(--background-color) !important;
+    background-color: {input_bg} !important;
 }}
 ul[role="listbox"] li {{
-    color: var(--text-color) !important;
+    color: {text_main} !important;
+}}
+
+/* ── CHIP PILLS (theme-aware inactive state) ── */
+div[class*="st-key-chip_btn_"] button {{
+    border-radius: 999px !important;
+    font-size: 0.76rem !important;
+    font-weight: 700 !important;
+    padding: 0.25rem 0.5rem !important;
+    margin: 0 !important;
+    min-height: 30px !important;
+    height: 30px !important;
+    transition: all 0.2s ease-in-out !important;
+    border: 1px solid {input_border} !important;
+    background: {bg_card} !important;
+    color: {text_sub} !important;
+    -webkit-text-fill-color: {text_sub} !important;
+}}
+div[class*="st-key-chip_btn_"] button:hover {{
+    transform: translateY(-1px);
+    border-color: rgba(250, 204, 21, 0.5) !important;
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+}}
+div[class*="st-key-chip_btn_"] button[kind="primary"],
+div[class*="st-key-chip_btn_"] button[data-testid="stBaseButton-primary"] {{
+    background: linear-gradient(135deg, rgba(234, 179, 8, 0.28) 0%, rgba(202, 138, 4, 0.42) 100%) !important;
+    border: 1.5px solid #facc15 !important;
+    color: #fef08a !important;
+    -webkit-text-fill-color: #fef08a !important;
+    box-shadow: 0 0 16px rgba(250, 204, 21, 0.65), 0 0 4px rgba(250, 204, 21, 0.9), inset 0 0 8px rgba(250, 204, 21, 0.25) !important;
+    text-shadow: 0 0 8px rgba(250, 204, 21, 0.7) !important;
 }}
 </style>
 """
@@ -752,19 +911,19 @@ def render_sortable_table(table_html: str, is_dark: bool = True, height: int = 5
           filter: brightness(1.25);
         }}
         th::after {{
-          content: ' ⇅';
+          content: ' ';
           opacity: 0.35;
           font-size: 0.72rem;
           margin-left: 4px;
           display: inline-block;
         }}
         th.sort-asc::after {{
-          content: ' ▲';
+          content: ' ';
           opacity: 1;
           color: #2563eb;
         }}
         th.sort-desc::after {{
-          content: ' ▼';
+          content: ' ';
           opacity: 1;
           color: #2563eb;
         }}
@@ -798,7 +957,7 @@ def render_sortable_table(table_html: str, is_dark: bool = True, height: int = 5
             const fdrMatch = clean.match(/^\\[(\\d+)\\]/);
             if (fdrMatch) return parseFloat(fdrMatch[1]);
 
-            clean = clean.replace(/[£$€%]/g, '').replace(/\\b(pts|xP|m|Mins|Apps)\\b/gi, '').trim();
+            clean = clean.replace(/[£$%]/g, '').replace(/\\b(pts|xP|m|Mins|Apps)\\b/gi, '').trim();
             const numMatch = clean.match(/^[-+]?\\d+(\\.\\d+)?/);
             if (numMatch) {{
               return parseFloat(numMatch[0]);
@@ -831,4 +990,4 @@ def render_sortable_table(table_html: str, is_dark: bool = True, height: int = 5
     </body>
     </html>
     """
-    components.html(component_code, height=height, scrolling=False)
+    st.iframe(component_code, height=height)

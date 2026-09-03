@@ -126,7 +126,7 @@ def fetch_transfer_targets_base_data(_conn, current_gw: int, target_gw: int, ena
         FROM fixtures f
         INNER JOIN teams th ON f.team_h = th.id
         INNER JOIN teams ta ON f.team_a = ta.id
-        WHERE f.event >= ? AND f.event <= ?
+        WHERE f.event >= :material/priority_high: AND f.event <= :material/priority_high:
         """,
         _conn,
         params=[current_gw, current_gw + 4],
@@ -196,7 +196,7 @@ def render_transfer_market_tab(conn, current_gw):
         )
     with col_t5_pop:
         st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
-        with st.popover("📖 Guide"):
+        with st.popover(":material/menu_book:  Guide"):
             st.markdown(
                 """
                 **Target Finder & Value Metrics**
@@ -216,7 +216,7 @@ def render_transfer_market_tab(conn, current_gw):
     col_search5, col_pos5, col_sort5 = st.columns([1.5, 1, 1.2])
     with col_search5:
         search_query5 = st_keyup(
-            "🔍 Search Player / Club",
+            ":material/search:  Search Player / Club",
             placeholder="e.g. Eze, Semenyo, Arsenal, LIV...",
             debounce=250,
             key="tab5_search_keyup",
@@ -245,11 +245,11 @@ def render_transfer_market_tab(conn, current_gw):
         )
     with col_excl5:
         exclude_my_squad = st.toggle(
-            "🚫 Exclude My Squad", value=True, key="tab5_exclude_squad"
+            ":material/do_not_disturb:  Exclude My Squad", value=True, key="tab5_exclude_squad"
         )
     with col_mkt5:
         enable_betting_target = st.toggle(
-            "📊 Apply Betting Odds", value=True, key="tab5_betting_toggle"
+            ":material/bar_chart:  Apply Betting Odds", value=True, key="tab5_betting_toggle"
         )
 
     odds_api_key = st.secrets.get("ODDS_API_KEY", os.getenv("ODDS_API_KEY", ""))
