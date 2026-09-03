@@ -17,6 +17,8 @@ from data import (
     get_teams_fdr_map,
     solve_optimal_xi,
 )
+from audit_db import save_pre_gw_snapshot, get_snapshot
+
 from theme import (
     fmt_num,
     render_list_card,
@@ -33,7 +35,6 @@ SILHOUETTE_BASE64 = (
     "MyA1LjgyIDEzIDEzIiBmaWxsPSIjNjQ3NDhiIi8+PC9zdmc+"
 )
 
-
 def get_player_img_url(photo, code=None):
     photo_str = str(photo) if pd.notna(photo) else ""
     if not photo_str or "Photo-Missing" in photo_str or photo_str == "None":
@@ -45,7 +46,6 @@ def get_player_img_url(photo, code=None):
     if not base_name.startswith("p"):
         base_name = f"p{base_name}"
     return f"https://resources.premierleague.com/premierleague/photos/players/110x140/{base_name}.png"
-
 
 @st.cache_data(ttl=600, show_spinner=False)
 def get_rolling_player_metrics(_conn, window_size: int = 5):
@@ -105,7 +105,6 @@ def get_rolling_player_metrics(_conn, window_size: int = 5):
         return df.set_index("element_id")
     return pd.DataFrame()
 
-
 def enrich_squad_df(df: pd.DataFrame, rolling_df: pd.DataFrame, fdr_map: dict) -> pd.DataFrame:
     if df is None or df.empty:
         return df
@@ -129,7 +128,6 @@ def enrich_squad_df(df: pd.DataFrame, rolling_df: pd.DataFrame, fdr_map: dict) -
         res["fdr5"] = 15
 
     return res
-
 
 def build_player_tooltip(p: pd.Series, is_live: bool = False) -> str:
     player_name = html.escape(str(p.get("Player", "")))
@@ -187,7 +185,6 @@ def build_player_tooltip(p: pd.Series, is_live: bool = False) -> str:
         f'</div></div>'
     )
 
-
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_manager_entry(manager_id: str):
     try:
@@ -197,7 +194,6 @@ def fetch_manager_entry(manager_id: str):
     except Exception:
         return {}
 
-
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_manager_history(manager_id: str):
     try:
@@ -206,7 +202,6 @@ def fetch_manager_history(manager_id: str):
         return res.json() if res.status_code == 200 else {}
     except Exception:
         return {}
-
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_manager_picks(manager_id: str, eval_gw: int, current_gw: int):
@@ -224,7 +219,6 @@ def fetch_manager_picks(manager_id: str, eval_gw: int, current_gw: int):
     except Exception:
         return {}
 
-
 @st.cache_data(ttl=120, show_spinner=False)
 def fetch_live_gameweek_points(eval_gw: int):
     try:
@@ -238,7 +232,6 @@ def fetch_live_gameweek_points(eval_gw: int):
         return {}
     except Exception:
         return {}
-
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_dream_team_data(target_gw: int):
@@ -268,7 +261,6 @@ def fetch_dream_team_data(target_gw: int):
         }
     except Exception:
         return None
-
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_motw_manager_data(target_gw: int):
@@ -317,7 +309,6 @@ def fetch_motw_manager_data(target_gw: int):
             pass
     return None
 
-
 def quick_sync_live_prices(conn):
     try:
         res = requests.get("https://fantasy.premierleague.com/api/bootstrap-static/", timeout=10)
@@ -350,7 +341,6 @@ def quick_sync_live_prices(conn):
     except Exception as e:
         st.error(f"Failed to refresh player prices: {e}")
     return False
-
 
 def solve_budget_dream_15(league_eval_df: pd.DataFrame, max_budget: float = 100.0) -> pd.DataFrame:
     df = league_eval_df.sort_values(by="Proj_Pts", ascending=False).copy()
@@ -406,7 +396,6 @@ def solve_budget_dream_15(league_eval_df: pd.DataFrame, max_budget: float = 100.
 
     return current_squad
 
-
 def solve_unconstrained_super_15(league_eval_df: pd.DataFrame) -> pd.DataFrame:
     df = league_eval_df.sort_values(by="Proj_Pts", ascending=False).copy()
     pos_targets = {"GKP": 2, "DEF": 5, "MID": 5, "FWD": 3}
@@ -423,7 +412,6 @@ def solve_unconstrained_super_15(league_eval_df: pd.DataFrame) -> pd.DataFrame:
                     team_counts[t_id] = team_counts.get(t_id, 0) + 1
 
     return df[df["id"].isin(selected_ids)].copy()
-
 
 def apply_market_projection_with_movement(
     conn,
@@ -494,7 +482,6 @@ def apply_market_projection_with_movement(
     }
 
     return round(final_proj, 2), dis_item, move_item
-
 
 def find_best_chip_gw(chip_type: str, squad_df: pd.DataFrame, conn, next_gw_id: int) -> int:
     if chip_type in ("None", "") or next_gw_id >= 19:
@@ -625,7 +612,6 @@ def find_best_chip_gw(chip_type: str, squad_df: pd.DataFrame, conn, next_gw_id: 
 
     return best_gw
 
-
 @st.cache_data(ttl=600, show_spinner=False)
 def get_cached_league_eval_df(
     _conn,
@@ -696,7 +682,6 @@ def get_cached_league_eval_df(
 
     return pd.DataFrame(league_eval_list)
 
-
 @st.cache_data(ttl=600, show_spinner=False)
 def get_cached_league_dream_15(
     _conn,
@@ -713,7 +698,6 @@ def get_cached_league_dream_15(
     league_dream_15 = solve_budget_dream_15(league_eval_df, max_budget=total_budget)
     return solve_optimal_xi(league_dream_15)
 
-
 @st.cache_data(ttl=600, show_spinner=False)
 def get_cached_league_super_15(
     _conn,
@@ -728,7 +712,6 @@ def get_cached_league_super_15(
     )
     super_15 = solve_unconstrained_super_15(league_eval_df)
     return solve_optimal_xi(super_15)
-
 
 def render_pitch_component(
     starters_df: pd.DataFrame,
@@ -967,7 +950,6 @@ def render_pitch_component(
     )
     st.markdown(full_pitch_html, unsafe_allow_html=True)
 
-
 def render_squad_analyzer_tab(conn, events_df, current_gw):
     col_t4_hdr, col_t4_pop = st.columns([6.2, 0.8], vertical_alignment="center")
     with col_t4_hdr:
@@ -1090,152 +1072,27 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
         m5.metric("Squad Value", f"£{squad_value:.1f}m")
         m6.metric("In The Bank", f"£{bank_balance:.1f}m")
 
-        if "tab4_simulated_chip" not in st.session_state:
-            st.session_state["tab4_simulated_chip"] = "None"
-
-        used_chips = {c["name"]: c.get("event") for c in mgr_history.get("chips", [])}
-        chip_defs = [
-            ("wildcard", "Wildcard 1"),
-            ("3xc", "Triple Captain"),
-            ("bboost", "Bench Boost"),
-            ("freehit", "Free Hit"),
-        ]
-
-        st.markdown(
-            """
-            <style>
-            div[class*="st-key-chip_btn_"] button {
-                border-radius: 999px !important;
-                font-size: 0.76rem !important;
-                font-weight: 700 !important;
-                padding: 0.25rem 0.5rem !important;
-                margin: 0 !important;
-                min-height: 30px !important;
-                height: 30px !important;
-                transition: all 0.2s ease-in-out !important;
-                border: 1px solid rgba(255, 255, 255, 0.15) !important;
-                background: rgba(15, 23, 42, 0.7) !important;
-                color: #94a3b8 !important;
-            }
-            div[class*="st-key-chip_btn_"] button:hover {
-                transform: translateY(-1px);
-                border-color: rgba(250, 204, 21, 0.5) !important;
-                color: #f8fafc !important;
-            }
-            div[class*="st-key-chip_btn_"] button[kind="primary"],
-            div[class*="st-key-chip_btn_"] button[data-testid="stBaseButton-primary"] {
-                background: linear-gradient(135deg, rgba(234, 179, 8, 0.28) 0%, rgba(202, 138, 4, 0.42) 100%) !important;
-                border: 1.5px solid #facc15 !important;
-                color: #fef08a !important;
-                -webkit-text-fill-color: #fef08a !important;
-                box-shadow: 0 0 16px rgba(250, 204, 21, 0.65), 0 0 4px rgba(250, 204, 21, 0.9), inset 0 0 8px rgba(250, 204, 21, 0.25) !important;
-                text-shadow: 0 0 8px rgba(250, 204, 21, 0.7) !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
-            """
-            <div style="margin: 0.65rem 0 0.35rem 0; display: flex; align-items: baseline; gap: 8px;">
-                <span style="font-size: 0.78rem; font-weight: 800; color: #94a3b8; letter-spacing: 0.05em;">HALF 1 CHIPS (GW1–19)</span>
-                <span style="font-size: 0.72rem; color: #64748b; font-style: italic;">(click an active chip to simulate across upcoming Gameweeks)</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        def toggle_chip(chip_name: str, optimal_gw: int):
-            if st.session_state.get("tab4_simulated_chip") == chip_name:
-                st.session_state["tab4_simulated_chip"] = "None"
-            else:
-                st.session_state["tab4_simulated_chip"] = chip_name
-                if optimal_gw:
-                    st.session_state["tab4_selected_gw"] = optimal_gw
-
-        chip_cols = st.columns(4)
-        for idx, (c_key, c_label) in enumerate(chip_defs):
-            with chip_cols[idx]:
-                if c_key in used_chips:
-                    st.button(
-                        f"✖ {c_label} (GW{used_chips[c_key]})",
-                        key=f"chip_btn_{c_key}",
-                        disabled=True,
-                        use_container_width=True,
-                        help=f"{c_label} was already played in Gameweek {used_chips[c_key]}",
-                    )
-                else:
-                    is_active = (st.session_state.get("tab4_simulated_chip") == c_label)
-                    btn_icon = "⭐" if is_active else "●"
-                    btn_suffix = " (Active)" if is_active else ""
-                    btn_type = "primary" if is_active else "secondary"
-                    opt_gw = find_best_chip_gw(c_label, squad_df, conn, next_gw_id)
-
-                    st.button(
-                        f"{btn_icon} {c_label}{btn_suffix}",
-                        key=f"chip_btn_{c_key}",
-                        type=btn_type,
-                        on_click=toggle_chip,
-                        args=(c_label, opt_gw),
-                        use_container_width=True,
-                        help=f"Click to simulate {c_label} (Optimal target: GW{opt_gw})",
-                    )
-
-        simulated_chip = st.session_state.get("tab4_simulated_chip", "None")
-
-        target_chip_gw = None
-        if simulated_chip != "None":
-            target_chip_gw = find_best_chip_gw(simulated_chip, squad_df, conn, next_gw_id)
-
-        standard_upcoming = [g for g in range(next_gw_id, min(20, next_gw_id + 3))]
-        upcoming_gws = list(standard_upcoming)
-
-        if target_chip_gw and target_chip_gw not in standard_upcoming:
-            upcoming_gws.append(target_chip_gw)
-        else:
-            fourth_gw = next_gw_id + 3
-            if fourth_gw <= 19:
-                upcoming_gws.append(fourth_gw)
-
         all_gw_options = []
         if last_finished_gw is not None:
             all_gw_options.append(last_finished_gw)
         if ongoing_gw is not None:
             all_gw_options.append(ongoing_gw)
-        all_gw_options.extend(upcoming_gws)
+        all_gw_options.append(next_gw_id)
         all_gw_options = sorted(list(dict.fromkeys(all_gw_options)))
-
-        chip_tag_map = {
-            "Triple Captain": "Best TC",
-            "Bench Boost": "Best BB",
-            "Free Hit": "Best FH",
-            "Wildcard 1": "Best WC",
-        }
 
         def format_gw_label(g):
             if g in finished_gw_ids:
                 return f"GW {g} (Finished)"
             elif g == ongoing_gw:
                 return f"GW {g} (Live)"
-            elif target_chip_gw and g == target_chip_gw:
-                tag = chip_tag_map.get(simulated_chip, "Best Chip")
-                return f"GW {g} ({tag} ⭐)"
             elif g == next_gw_id:
                 return f"GW {g} (Upcoming)"
             else:
                 return f"GW {g}"
 
-        default_gw = (
-            target_chip_gw
-            if (target_chip_gw and target_chip_gw in all_gw_options)
-            else (ongoing_gw if ongoing_gw else next_gw_id)
-        )
+        default_gw = ongoing_gw if ongoing_gw else next_gw_id
 
-        if (
-            "tab4_selected_gw" not in st.session_state
-            or st.session_state["tab4_selected_gw"] not in all_gw_options
-        ):
+        if "tab4_selected_gw" not in st.session_state or st.session_state["tab4_selected_gw"] not in all_gw_options:
             st.session_state["tab4_selected_gw"] = default_gw
 
         default_idx = (
@@ -1243,36 +1100,11 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             if st.session_state["tab4_selected_gw"] in all_gw_options
             else 0
         )
-
-        if target_chip_gw and simulated_chip != "None" and target_chip_gw in all_gw_options:
-            chip_gw_idx = all_gw_options.index(target_chip_gw) + 1
-            st.markdown(
-                f"""
-                <style>
-                .st-key-tab4_selected_gw div[role="radiogroup"] > label:nth-child({chip_gw_idx}),
-                div[data-testid="stRadio"]:has(input[name*="tab4_selected_gw"]) div[role="radiogroup"] > label:nth-child({chip_gw_idx}) {{
-                    background: rgba(234, 179, 8, 0.09) !important;
-                    border: 1px solid rgba(234, 179, 8, 0.45) !important;
-                    border-radius: 8px !important;
-                    padding: 2px 8px 2px 6px !important;
-                    box-shadow: 0 0 10px rgba(234, 179, 8, 0.25) !important;
-                    transition: all 0.2s ease-in-out !important;
-                }}
-                .st-key-tab4_selected_gw div[role="radiogroup"] > label:nth-child({chip_gw_idx}):hover,
-                div[data-testid="stRadio"]:has(input[name*="tab4_selected_gw"]) div[role="radiogroup"] > label:nth-child({chip_gw_idx}):hover {{
-                    background: rgba(234, 179, 8, 0.16) !important;
-                    border-color: rgba(234, 179, 8, 0.75) !important;
-                }}
-                .st-key-tab4_selected_gw div[role="radiogroup"] > label:nth-child({chip_gw_idx}) p,
-                div[data-testid="stRadio"]:has(input[name*="tab4_selected_gw"]) div[role="radiogroup"] > label:nth-child({chip_gw_idx}) p {{
-                    color: #facc15 !important;
-                    -webkit-text-fill-color: #facc15 !important;
-                    font-weight: 700 !important;
-                }}
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
+        
+        # Chip Selector for Upcoming GW
+        active_chip = "None"
+        if st.session_state["tab4_selected_gw"] == next_gw_id:
+            active_chip = st.selectbox("Active Chip This GW:", ["None", "Triple Captain", "Bench Boost", "Free Hit"], key="tab4_active_chip")
 
         col_gw_sel, col_gw_ref = st.columns([6.2, 0.8], vertical_alignment="center")
         with col_gw_sel:
@@ -1312,6 +1144,60 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             enable_comparison = st.toggle("⚖️ **Comparison**", value=False, key="tab4_compare_toggle")
         with col_tgl3:
             super_team_mode = False
+            # Check if snapshot exists for lock UI
+
+            existing_snap = get_snapshot(conn, next_gw_id) if selected_eval_gw == next_gw_id else None
+
+            snap_locked = existing_snap is not None
+
+
+            if selected_eval_gw == next_gw_id:
+
+                col_lock_btn, col_lock_info = st.columns([1.6, 4.4], vertical_alignment="center")
+
+                with col_lock_btn:
+
+                    btn_label = "?? Re-Lock Lineup" if snap_locked else "?? Lock In Starting XI"
+
+                    if st.button(btn_label, key=f"commit_gw_{selected_eval_gw}", use_container_width=True):
+
+                        full_lineup_df = pd.concat([optimal_xi, optimal_bench], ignore_index=True)
+
+                        lineup_records = full_lineup_df.to_dict(orient="records")
+
+                        
+
+                        save_pre_gw_snapshot(
+
+                            conn=conn,
+
+                            gw=selected_eval_gw,
+
+                            lineup_data=lineup_records,
+
+                            chip=active_chip if active_chip != "None" else None,
+
+                            formation=optimal_formation,
+
+                            market_weight=market_weight if enable_betting else 0.0,
+
+                            factor_movement=factor_movement if enable_betting else False,
+
+                        )
+
+                        st.toast(f"GW{selected_eval_gw} optimal lineup committed to Audit Journal!", icon="?")
+
+                        st.rerun()
+
+
+                with col_lock_info:
+
+                    if snap_locked:
+
+                        lock_time = existing_snap.get("created_at", "")[:16].replace("T", " ")
+
+                        st.markdown(f"<span style='color:#22c55e; font-size:0.8rem; margin-left:10px;'>? Locked at {lock_time}</span>", unsafe_allow_html=True)
+
             if enable_comparison:
                 super_team_mode = st.toggle("🌟 **Super Team**", value=False, key="tab4_super_team_toggle")
         with col_tgl4:
@@ -1539,35 +1425,62 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             squad_eval_df = pd.DataFrame(squad_eval_list)
             optimal_xi, optimal_bench, optimal_formation = solve_optimal_xi(squad_eval_df)
 
-            chip_active_on_gw = (simulated_chip != "None")
-            is_optimal_chip_gw = (selected_eval_gw == target_chip_gw)
+            chip_active_on_gw = (active_chip != "None" and selected_eval_gw == next_gw_id)
 
             # Strictly enforce 1 Captain and 1 Vice Captain
+
             optimal_xi["is_cap"] = False
+
             optimal_xi["is_vc"] = False
+
             optimal_xi["Multiplier"] = 1
+
             if not optimal_bench.empty:
+
                 optimal_bench["is_cap"] = False
+
                 optimal_bench["is_vc"] = False
+
                 optimal_bench["Multiplier"] = 1
 
             if len(optimal_xi) > 0:
+
                 top_id = optimal_xi.sort_values("Proj_Pts", ascending=False).iloc[0]["id"]
+
                 optimal_xi.loc[optimal_xi["id"] == top_id, "is_cap"] = True
-                optimal_xi.loc[optimal_xi["id"] == top_id, "Multiplier"] = 3 if simulated_chip == "Triple Captain" else 2
+
+                optimal_xi.loc[optimal_xi["id"] == top_id, "Multiplier"] = 3 if (chip_active_on_gw and active_chip == "Triple Captain") else 2
 
             if len(optimal_xi) > 1:
+
                 second_id = optimal_xi.sort_values("Proj_Pts", ascending=False).iloc[1]["id"]
+
                 optimal_xi.loc[optimal_xi["id"] == second_id, "is_vc"] = True
 
-            if simulated_chip == "Bench Boost" and not optimal_bench.empty:
-                optimal_bench["Multiplier"] = 1
+            # Calculate base points
 
             user_proj_xi_pts = optimal_xi["Proj_Pts"].sum()
-            if chip_active_on_gw and simulated_chip == "Triple Captain":
+
+            
+
+            # Add normal captain double points (Proj_Pts only has 1x base points)
+
+            if len(optimal_xi) > 0:
+
                 cap_pts = optimal_xi.sort_values("Proj_Pts", ascending=False).iloc[0]["Proj_Pts"]
-                user_proj_xi_pts += cap_pts
-            elif chip_active_on_gw and simulated_chip == "Bench Boost":
+
+                user_proj_xi_pts += cap_pts  # Add once for 2x
+
+                
+
+                # Add again if Triple Captain
+
+                if chip_active_on_gw and active_chip == "Triple Captain":
+
+                    user_proj_xi_pts += cap_pts
+
+            if chip_active_on_gw and active_chip == "Bench Boost":
+
                 user_proj_xi_pts += optimal_bench["Proj_Pts"].sum()
 
             avg_xi_fdr = float(optimal_xi["FDR"].mean())
@@ -1604,20 +1517,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
 
             calc_loader.empty()
 
-            is_long_range = (target_chip_gw is not None) and (target_chip_gw - next_gw_id >= 4)
-            long_range_warning = (
-                " <span style='font-size: 0.72rem; color: #94a3b8; font-weight: normal;'>"
-                "(⚠️ Long-range projection based on current form & fixed schedule)</span>"
-                if is_long_range else ""
-            )
-
-            if chip_active_on_gw:
-                if is_optimal_chip_gw:
-                    chip_note = f" · <span style='color:#eab308;'>Active Simulation: {simulated_chip} (Optimal Target ⭐)</span>{long_range_warning}"
-                else:
-                    chip_note = f" · <span style='color:#60a5fa;'>Active Simulation: {simulated_chip} (Model prefers GW{target_chip_gw})</span>{long_range_warning}"
-            else:
-                chip_note = ""
+            chip_note = f" &bull; <span style=\'color:#eab308;\'>Active Simulation: {active_chip}</span>" if chip_active_on_gw else ""
 
             is_dark = st.session_state.get("theme_mode", "dark") == "dark"
             banner_bg = "#151d24" if is_dark else "#ffffff"
@@ -1641,10 +1541,10 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             pts_delta_str = f"{user_proj_xi_pts - comp_proj_xi_pts:+.1f} vs {comp_target_label}" if enable_comparison else None
             pts_label = (
                 "Projected XI + Bench (BB)"
-                if (chip_active_on_gw and simulated_chip == "Bench Boost")
+                if (chip_active_on_gw and active_chip == "Bench Boost")
                 else (
                     "Projected XI (3x TC)"
-                    if (chip_active_on_gw and simulated_chip == "Triple Captain")
+                    if (chip_active_on_gw and active_chip == "Triple Captain")
                     else "Projected XI Points"
                 )
             )

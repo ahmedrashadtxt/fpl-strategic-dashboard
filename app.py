@@ -13,6 +13,8 @@ from data import (
     get_summary_stats,
     get_teams_fdr_map,
 )
+from tabs.audit_journal import render_audit_journal_tab
+from tabs.simulator import render_simulator_tab
 from tabs import (
     render_defensive_stats_tab,
     render_expected_stats_tab,
@@ -50,26 +52,48 @@ GA_MEASUREMENT_ID = st.secrets.get(
     "GA_MEASUREMENT_ID", os.getenv("GA_MEASUREMENT_ID", "")
 )
 if GA_MEASUREMENT_ID:
-    ga_tracking_code = f"""
-    <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}"></script>
+    ga_script = f"""
     <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){{dataLayer.push(arguments);}}
-      gtag('js', new Date());
-      gtag('config', '{GA_MEASUREMENT_ID}', {{
-          'send_page_view': true,
-          'page_location': document.referrer || window.location.href,
-          'page_title': 'FPL Strategic Dashboard',
-          'cookie_flags': 'SameSite=None;Secure'
-      }});
+        try {{
+            // Attempt to inject GA natively into the main parent window to avoid iframe cookie/visibility issues
+            if (!window.parent.document.getElementById('ga-script')) {{
+                var gaScript = window.parent.document.createElement('script');
+                gaScript.id = 'ga-script';
+                gaScript.async = true;
+                gaScript.src = "https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}";
+                window.parent.document.head.appendChild(gaScript);
+
+                var inlineScript = window.parent.document.createElement('script');
+                inlineScript.innerHTML = `
+                    window.dataLayer = window.dataLayer || [];
+                    function gtag(){{dataLayer.push(arguments);}}
+                    gtag('js', new Date());
+                    gtag('config', '{GA_MEASUREMENT_ID}');
+                `;
+                window.parent.document.head.appendChild(inlineScript);
+            }}
+        }} catch (e) {{
+            // Fallback for cross-origin iframes
+            var gaScript = document.createElement('script');
+            gaScript.async = true;
+            gaScript.src = "https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}";
+            document.head.appendChild(gaScript);
+
+            var inlineScript = document.createElement('script');
+            inlineScript.innerHTML = `
+                window.dataLayer = window.dataLayer || [];
+                function gtag(){{dataLayer.push(arguments);}}
+                gtag('js', new Date());
+                gtag('config', '{GA_MEASUREMENT_ID}', {{
+                    'send_page_view': true,
+                    'page_location': document.referrer || window.location.href
+                }});
+            `;
+            document.head.appendChild(inlineScript);
+        }}
     </script>
     """
-    components.html(
-        f"<div style='display:none;'>{ga_tracking_code}</div>",
-        height=0,
-        width=0,
-    )
+    components.html(ga_script, height=0, width=0)
 
 # ── Data & Connection Initialization ──────────────────────────────────────────
 ensure_database_ready()
@@ -103,7 +127,7 @@ def _render_id_modal_body():
         new_id = st.text_input(
             "FPL Team ID",
             value=st.session_state.get("manager_id", ""),
-            placeholder="e.g. 7716321",
+            placeholder="e.g. 1234567",
         )
 
         st.markdown(
@@ -113,7 +137,7 @@ def _render_id_modal_body():
                 1. Log into <span style="color: #60a5fa;">fantasy.premierleague.com</span> and click the <strong>Points</strong> or <strong>Pick Team</strong> tab.<br>
                 2. Check the URL in your browser's address bar:<br>
                 <div style="margin-top: 4px; padding: 4px 8px; background: rgba(0,0,0,0.4); border-radius: 4px; word-break: break-all; font-family: monospace;">
-                    https://fantasy.premierleague.com/entry/<span style="color: #4ade80; font-weight: 800;">7716321</span>/event/2
+                    https://fantasy.premierleague.com/entry/<span style="color: #4ade80; font-weight: 800;">1234567</span>/event/2
                 </div>
                 👉 The number right after <code>/entry/</code> is your Team ID.
             </div>
@@ -217,15 +241,17 @@ with col_theme:
         st.rerun()
 
 # ── Main Sticky Tabs ──────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(
     [
         "Squad Analyzer",
         "Transfer Solver",
+        "Match Simulator",
         "Expected Stats",
         "Defensive Contributions",
         "Rolling Form",
         "Fixture Ticker",
         "Transfer Market",
+        "Audit Journal",
     ]
 )
 
@@ -234,12 +260,16 @@ with tab1:
 with tab2:
     render_transfer_analyzer_tab(conn, events_df, current_gw)
 with tab3:
-    render_expected_stats_tab(conn, current_gw)
+    render_simulator_tab(conn, events_df, current_gw)
 with tab4:
-    render_defensive_stats_tab(conn, current_gw)
+    render_expected_stats_tab(conn, current_gw)
 with tab5:
-    render_rolling_form_tab(conn, current_gw, teams_fdr_map)
+    render_defensive_stats_tab(conn, current_gw)
 with tab6:
-    render_fixture_ticker_tab(conn, current_gw)
+    render_rolling_form_tab(conn, current_gw, teams_fdr_map)
 with tab7:
+    render_fixture_ticker_tab(conn, current_gw)
+with tab8:
     render_transfer_market_tab(conn, current_gw)
+with tab9:
+    render_audit_journal_tab(conn, events_df, current_gw)

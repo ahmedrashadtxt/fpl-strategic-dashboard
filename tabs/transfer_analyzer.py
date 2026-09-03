@@ -1,12 +1,15 @@
 import html
+import itertools
 import math
 import os
+from collections import Counter
+
 import pandas as pd
 import requests
 import streamlit as st
 
 from betting_engine import (
-    fetch_upcoming_betting_odds,
+    load_db_market_odds,
     get_fixture_market_xg_and_movement,
 )
 from data import (
@@ -156,9 +159,15 @@ def build_player_tooltip(p: pd.Series, horizon_len: int = 1) -> str:
 
     transfer_badge_row = ""
     if bool(p.get("is_transfer_in") is True):
-        transfer_badge_row = '<div class="tt-row" style="color:#34d399; font-weight:700;"><span>🟢 Proposed Sign</span></div>'
+        if bool(p.get("is_target_in") is True):
+            transfer_badge_row = '<div class="tt-row" style="color:#38bdf8; font-weight:700;"><span>🎯 Target Signing</span></div>'
+        else:
+            transfer_badge_row = '<div class="tt-row" style="color:#34d399; font-weight:700;"><span>🟢 Proposed Sign</span></div>'
     elif bool(p.get("is_transfer_out") is True):
-        transfer_badge_row = '<div class="tt-row" style="color:#f87171; font-weight:700;"><span>🔴 Proposed Sale</span></div>'
+        if bool(p.get("is_forced_out") is True):
+            transfer_badge_row = '<div class="tt-row" style="color:#f87171; font-weight:700;"><span>🔴 Forced Sale</span></div>'
+        else:
+            transfer_badge_row = '<div class="tt-row" style="color:#f87171; font-weight:700;"><span>🔴 Proposed Sale</span></div>'
 
     return (
         f'<div class="player-tooltip-card">'
@@ -289,11 +298,23 @@ def fetch_transfer_manager_picks(manager_id: str, next_gw: int):
 
 def calculate_available_fts(mgr_history: dict) -> int:
     current_season = mgr_history.get("current", []) if mgr_history else []
+    if not current_season:
+        return 1
+
+    sorted_events = sorted(current_season, key=lambda x: x.get("event", 0))
+    chips_played = {c.get("event"): c.get("name") for c in mgr_history.get("chips", [])}
+
     ft = 1
-    for ev in current_season:
+    for ev in sorted_events[1:]:
+        gw = ev.get("event")
+        chip = chips_played.get(gw)
+        if chip in ("wildcard", "freehit"):
+            continue
+
         transfers_made = ev.get("event_transfers", 0)
         ft = max(0, ft - transfers_made)
         ft = min(5, ft + 1)
+
     return max(1, min(5, ft))
 
 
@@ -323,53 +344,412 @@ def evaluate_league_multi_gw(
            CASE p.element_type WHEN 1 THEN 'GKP' WHEN 2 THEN 'DEF' WHEN 3 THEN 'MID' WHEN 4 THEN 'FWD' END AS Pos,
            p.now_cost / 10.0 AS Cost, p.minutes AS minutes,
            p.total_points AS Season_Points, p.form AS Form, p.points_per_game AS PPG,
-           p.status AS Status, p.chance_of_playing_next_round AS Chance, p.news AS News
+           p.status AS Status, p.chance_of_playing_next_round AS Chance, p.news AS News,
+           p.can_select AS can_select,
+           p.expected_goal_involvements_per_90 AS xGI_per_90
     FROM players p
     INNER JOIN teams t ON p.team = t.id
-    WHERE (p.status = 'a' OR p.chance_of_playing_next_round >= 75)
     """
     players_df = pd.read_sql(all_players_query, _conn)
     hist_baselines = get_historical_player_baselines(_conn)
-    market_cache = (
-        fetch_upcoming_betting_odds(st.secrets.get("ODDS_API_KEY", os.getenv("ODDS_API_KEY", "")))
-        if enable_betting
-        else {}
-    )
+    rolling_metrics = get_rolling_player_metrics(_conn)
+    market_cache = load_db_market_odds(_conn) if enable_betting else {}
+
+    # DGW-safe fixture map: (team_id, gw) → list[fixture_dict].
+    # Using setdefault+append ensures double gameweeks accumulate both fixtures
+    # instead of silently overwriting the first with the second.
+    fixture_map: dict[tuple, list] = {}
+    for _, row in fix_df.iterrows():
+        gw = row["GW"]
+        h_id, a_id = row["team_h_id"], row["team_a_id"]
+        fixture_map.setdefault((h_id, gw), []).append({
+            "opponent": f"{row['Away_Team']} (H)",
+            "fdr": int(row["Home_Diff"]),
+            "is_home": True,
+        })
+        fixture_map.setdefault((a_id, gw), []).append({
+            "opponent": f"{row['Home_Team']} (A)",
+            "fdr": int(row["Away_Diff"]),
+            "is_home": False,
+        })
 
     results = []
+    past_gws = max(1, start_gw - 1)
+
+    # Precompute rolling minutes as a dictionary lookup
+    roll_mins_dict = {}
+    if rolling_metrics is not None and not rolling_metrics.empty:
+        roll_mins_dict = rolling_metrics["roll_mins"].to_dict()
+
+
     for _, p in players_df.iterrows():
-        total_horizon_xp = 0.0
-        gw_breakdown = {}
-        for gw in range(start_gw, end_gw + 1):
-            f_data = get_fixture_for_team(fix_df, p["team_id"], gw)
-            base_xp = calculate_projected_points(p, f_data, start_gw, hist_baselines)
-            if enable_betting and f_data.get("opponent"):
-                opp_short = f_data["opponent"].replace(" (H)", "").replace(" (A)", "")
-                final_xp, _, _ = apply_market_projection_with_movement(
-                    _conn,
-                    base_xp,
-                    p["Pos"],
-                    f_data["fdr"],
-                    f_data["is_home"],
-                    p["Team"],
-                    opp_short,
-                    market_weight,
-                    factor_movement,
-                    market_cache,
-                )
+        pid = p["id"]
+        roll_m = float(roll_mins_dict.get(pid, 0) or 0)
+        p_mins = float(p.get("minutes", 0) or 0)
+        avg_mins = roll_m if roll_m > 0 else (p_mins / past_gws)
+
+        # Hard-zero unavailable players: departed (status='u'), released (can_select=0),
+        # or fully ruled out (chance_of_playing_next_round == 0).
+        # They stay in results so curr_squad_horizon always has all 15 picks, allowing
+        # the optimizer to flag them for removal. They must NOT appear in available_market_df.
+        is_unavailable = (
+            p.get("can_select") == 0
+            or str(p.get("Status", "")).lower() == "u"
+            or p.get("Chance") == 0
+        )
+        if is_unavailable:
+            p_dict = dict(p)
+            p_dict["avg_mins"] = 0.0
+            p_dict["Horizon_xP"] = 0.0
+            p_dict["Proj_Pts"] = 0.0
+            p_dict["Target_Horizon_xP"] = 0.0
+            p_dict["Avg_xP"] = 0.0
+            for gw in range(start_gw, end_gw + 1):
+                p_dict[f"GW{gw}"] = 0.0
+                p_dict[f"Target_GW{gw}"] = 0.0
+            results.append(p_dict)
+            continue
+
+        if start_gw > 1:
+            if avg_mins >= 65:
+                mins_weight = 1.0
+            elif avg_mins >= 45:
+                mins_weight = 0.80
+            elif avg_mins >= 20:
+                mins_weight = 0.45
             else:
-                final_xp = base_xp
-            total_horizon_xp += final_xp
-            gw_breakdown[f"GW{gw}"] = round(final_xp, 1)
+                mins_weight = max(0.12, (avg_mins + 5.0) / 90.0)
+        else:
+            mins_weight = 1.0 if p["Cost"] >= 7.0 else 0.85
+
+        if mins_weight <= 0.12 and p["Status"] != 'a':
+            p_dict = dict(p)
+            p_dict["avg_mins"] = round(avg_mins, 0)
+            p_dict["Horizon_xP"] = 0.0
+            p_dict["Proj_Pts"] = 0.0
+            p_dict["Avg_xP"] = 0.0
+            for gw in range(start_gw, end_gw + 1):
+                p_dict[f"GW{gw}"] = 0.0
+            results.append(p_dict)
+            continue  # skip heavy evaluation for inactive players
+
+        total_horizon_xp = 0.0
+        total_target_horizon_xp = 0.0
+        gw_breakdown = {}
+        target_gw_breakdown = {}
+        team_id = p["team_id"]
+
+        p_target = dict(p)
+        p_target["is_target"] = True
+
+        for gw in range(start_gw, end_gw + 1):
+            team_fixtures = fixture_map.get((team_id, gw), [])
+
+            if not team_fixtures:
+                gw_breakdown[f"GW{gw}"] = 0.0
+                target_gw_breakdown[f"Target_GW{gw}"] = 0.0
+            else:
+                gw_scaled_xp = 0.0
+                target_gw_scaled_xp = 0.0
+                for f_data in team_fixtures:
+                    base_xp = calculate_projected_points(p, f_data, start_gw, hist_baselines)
+                    target_base_xp = calculate_projected_points(p_target, f_data, start_gw, hist_baselines)
+                    
+                    if enable_betting:
+                        opp_short = f_data["opponent"].replace(" (H)", "").replace(" (A)", "")
+                        final_xp, _, _ = apply_market_projection_with_movement(
+                            _conn, base_xp, p["Pos"], f_data["fdr"], f_data["is_home"],
+                            p["Team"], opp_short, market_weight, factor_movement, market_cache,
+                        )
+                        target_final_xp, _, _ = apply_market_projection_with_movement(
+                            _conn, target_base_xp, p["Pos"], f_data["fdr"], f_data["is_home"],
+                            p["Team"], opp_short, market_weight, factor_movement, market_cache,
+                        )
+                    else:
+                        final_xp = base_xp
+                        target_final_xp = target_base_xp
+                        
+                    gw_scaled_xp += final_xp
+                    target_gw_scaled_xp += target_final_xp
+
+                total_horizon_xp += gw_scaled_xp
+                total_target_horizon_xp += target_gw_scaled_xp
+                gw_breakdown[f"GW{gw}"] = round(gw_scaled_xp, 1)
+                target_gw_breakdown[f"Target_GW{gw}"] = round(target_gw_scaled_xp, 1)
 
         p_dict = dict(p)
+        p_dict["avg_mins"] = round(avg_mins, 0)
         p_dict["Horizon_xP"] = round(total_horizon_xp, 2)
         p_dict["Proj_Pts"] = round(total_horizon_xp, 2)
+        p_dict["Target_Horizon_xP"] = round(total_target_horizon_xp, 2)
         p_dict["Avg_xP"] = round(total_horizon_xp / max(1, horizon_len), 2)
         p_dict.update(gw_breakdown)
+        p_dict.update(target_gw_breakdown)
         results.append(p_dict)
 
     return pd.DataFrame(results)
+
+
+def _fast_xi_xp(all_players: list[dict]) -> float:
+    """Greedy O(n log n) starting-XI xP estimator — no ILP overhead."""
+    gkps = sorted([p for p in all_players if p.get("Pos") == "GKP"], key=lambda x: -x.get("Horizon_xP", 0))
+    defs = sorted([p for p in all_players if p.get("Pos") == "DEF"], key=lambda x: -x.get("Horizon_xP", 0))
+    mids = sorted([p for p in all_players if p.get("Pos") == "MID"], key=lambda x: -x.get("Horizon_xP", 0))
+    fwds = sorted([p for p in all_players if p.get("Pos") == "FWD"], key=lambda x: -x.get("Horizon_xP", 0))
+    mandatory = gkps[:1] + defs[:3] + mids[:2] + fwds[:1]
+    rem_pool = sorted(defs[3:] + mids[2:] + fwds[1:], key=lambda x: -x.get("Horizon_xP", 0))
+    starters = mandatory + rem_pool[:4]
+    return sum(p.get("Horizon_xP", 0) for p in starters)
+
+
+def _fast_xi_player_set(all_players: list[dict]) -> set:
+    """Returns the set of player IDs in the optimal starting XI.
+
+    Mirrors `_fast_xi_xp` greedy selection exactly, but returns a set of IDs
+    instead of summed xP. Used to scope `reinvested_starting_cost` to the 11
+    starters only, so the bonus score doesn't reward bench investment.
+    """
+    gkps = sorted([p for p in all_players if p.get("Pos") == "GKP"], key=lambda x: -x.get("Horizon_xP", 0))
+    defs = sorted([p for p in all_players if p.get("Pos") == "DEF"], key=lambda x: -x.get("Horizon_xP", 0))
+    mids = sorted([p for p in all_players if p.get("Pos") == "MID"], key=lambda x: -x.get("Horizon_xP", 0))
+    fwds = sorted([p for p in all_players if p.get("Pos") == "FWD"], key=lambda x: -x.get("Horizon_xP", 0))
+    mandatory = gkps[:1] + defs[:3] + mids[:2] + fwds[:1]
+    rem_pool = sorted(defs[3:] + mids[2:] + fwds[1:], key=lambda x: -x.get("Horizon_xP", 0))
+    starters = mandatory + rem_pool[:4]
+    return {p["id"] for p in starters}
+
+
+
+
+def _maximize_leftover_budget(
+    in_players_flat: list[dict],
+    remaining_squad: pd.DataFrame,
+    budget_available: float,
+    avail_cands: pd.DataFrame,
+    target_in_set: set,
+    combo_budget: int = 80000,
+) -> tuple[list[dict], float]:
+    """Greedy per-slot budget optimiser — O(n×k) instead of O(n^k).
+
+    For each free (non-target) slot in the proposed transfer-in set, independently
+    picks the highest-xP affordable candidate that satisfies team limits, committing
+    cost and team-counts slot by slot. This eliminates the itertools.product
+    combinatorial explosion while producing near-optimal results in practice
+    (slots are typically 1–2, making the greedy choice essentially exact).
+    """
+    # Pre-sort candidates per position by xP descending for fast scanning
+    pos_cand_map: dict[str, pd.DataFrame] = {}
+    for pos in avail_cands["Pos"].unique():
+        pos_cand_map[pos] = avail_cands[avail_cands["Pos"] == pos].sort_values(
+            "Horizon_xP", ascending=False
+        )
+
+    initial_in_players = [dict(p) for p in in_players_flat]
+    working_in = list(initial_in_players)
+
+    free_slots = [i for i, p in enumerate(working_in) if p["id"] not in target_in_set]
+    if not free_slots or avail_cands.empty:
+        leftover = round(budget_available - sum(p["Cost"] for p in working_in), 2)
+        return working_in, leftover
+
+    locked_idx = [i for i in range(len(working_in)) if i not in free_slots]
+    
+    base_team_counts = remaining_squad["team_id"].value_counts().to_dict()
+    for i in locked_idx:
+        tid = working_in[i]["team_id"]
+        base_team_counts[tid] = base_team_counts.get(tid, 0) + 1
+
+    excluded_ids = set(remaining_squad["id"].tolist())
+    for i in locked_idx:
+        excluded_ids.add(working_in[i]["id"])
+
+    committed_team_counts = dict(base_team_counts)
+    committed_ids = set(excluded_ids)
+
+    for slot_i in free_slots:
+        cur_p = working_in[slot_i]
+        pos = cur_p["Pos"]
+        
+        current_total = sum(p["Cost"] for p in working_in)
+        headroom = budget_available - current_total
+        max_candidate_cost = cur_p["Cost"] + headroom
+        cur_xp = cur_p["Horizon_xP"]
+        best_cand = None
+        best_xp = cur_xp  # only upgrade if we beat current player
+
+        cands = pos_cand_map.get(pos, pd.DataFrame())
+        for _, cand in cands.iterrows():
+            c_xp = cand["Horizon_xP"]
+            if c_xp <= best_xp:
+                break  # sorted desc — nothing better remains
+            if cand["id"] in committed_ids:
+                continue
+            if cand["Cost"] > max_candidate_cost + 1e-5:
+                continue
+            tid = cand["team_id"]
+            if tid != cur_p["team_id"] and committed_team_counts.get(tid, 0) >= 3:
+                continue
+            best_cand = cand
+            best_xp = c_xp
+            break  # first valid candidate is best (sorted by xP desc)
+
+        if best_cand is not None:
+            working_in[slot_i] = best_cand.to_dict()
+            committed_ids.add(best_cand["id"])
+            tid = best_cand["team_id"]
+            committed_team_counts[tid] = committed_team_counts.get(tid, 0) + 1
+        else:
+            committed_ids.add(cur_p["id"])
+            tid = cur_p["team_id"]
+            committed_team_counts[tid] = committed_team_counts.get(tid, 0) + 1
+
+    # Budget safety assertion: if violated, revert to the original proposed list
+    total_in_cost = sum(p["Cost"] for p in working_in)
+    if total_in_cost > budget_available + 1e-5:
+        working_in = initial_in_players
+
+    leftover = round(budget_available - sum(p["Cost"] for p in working_in), 2)
+    return working_in, leftover
+
+
+import pulp
+
+def solve_chip_transfers_pulp(
+    current_squad_df: pd.DataFrame,
+    candidate_league_df: pd.DataFrame,
+    team_value: float,
+    locked_player_ids: list = None,
+    target_in_player_ids: list = None,
+    force_out_player_ids: list = None,
+    blocked_in_player_ids: list = None,
+    is_free_hit: bool = False,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Linear programming solver for 15-man squad overhaul (Wildcard/Free Hit)."""
+    locked_set = set(locked_player_ids or [])
+    blocked_in_set = set(blocked_in_player_ids or [])
+    target_in_set = set(target_in_player_ids or []) - blocked_in_set
+    
+    prob = pulp.LpProblem("FPL_Chip_Solver", pulp.LpMaximize)
+    
+    # 1. Candidate Pool Pre-Filtering (Crucial for Speed)
+    raw_avail = candidate_league_df[
+        (~candidate_league_df["id"].isin(blocked_in_set)) &
+        (candidate_league_df["Status"].isin(['a', 'd'])) &
+        (candidate_league_df["Chance"] != 0) &
+        (candidate_league_df["Chance"] != '0')
+    ].copy()
+    
+    top_cand_list = []
+    
+    limits = {"GKP": 15, "DEF": 40, "MID": 45, "FWD": 25}
+    for pos, limit in limits.items():
+        pos_df = raw_avail[raw_avail["Pos"] == pos]
+        if pos_df.empty: continue
+        
+        top_xp = pos_df.sort_values(by="Horizon_xP", ascending=False).head(limit)
+        cheapest = pos_df.sort_values(by="Cost", ascending=True).head(5)
+        
+        top_cand_list.extend([top_xp, cheapest])
+        
+    # Always include the user's current 15 players
+    current_in_raw = candidate_league_df[candidate_league_df["id"].isin(current_squad_df["id"].tolist())]
+    top_cand_list.append(current_in_raw)
+    
+    if target_in_set:
+        top_cand_list.append(candidate_league_df[candidate_league_df["id"].isin(target_in_set)])
+    if locked_set:
+        top_cand_list.append(candidate_league_df[candidate_league_df["id"].isin(locked_set)])
+        
+    import pandas as pd
+    avail = pd.concat(top_cand_list, ignore_index=True).drop_duplicates(subset=["id"])
+    
+    player_vars = {}
+    starter_vars = {}
+    
+    cost_dict = avail.set_index("id")["Cost"].to_dict()
+    xp_dict = avail.set_index("id")["Horizon_xP"].to_dict()
+    
+    if is_free_hit:
+        for pid in avail["id"]:
+            x = pulp.LpVariable(f"squad_{pid}", cat="Binary")
+            player_vars[pid] = x
+            
+            if pid in locked_set or pid in target_in_set:
+                prob += x == 1
+            if pid in (force_out_player_ids or []) and pid not in locked_set:
+                prob += x == 0
+                
+        # Objective: Maximize sum(player_vars[i] * xP_next_gw[i])
+        prob += pulp.lpSum(player_vars[pid] * xp_dict[pid] for pid in player_vars)
+        
+    else:
+        for pid in avail["id"]:
+            x = pulp.LpVariable(f"squad_{pid}", cat="Binary")
+            y = pulp.LpVariable(f"start_{pid}", cat="Binary")
+            player_vars[pid] = x
+            starter_vars[pid] = y
+            
+            prob += y <= x
+            if pid in locked_set or pid in target_in_set:
+                prob += x == 1
+            if pid in (force_out_player_ids or []) and pid not in locked_set:
+                prob += x == 0
+                
+        # Position constraints for 11-man starting XI
+        prob += pulp.lpSum(starter_vars[pid] for pid in avail[avail["Pos"] == "GKP"]["id"]) == 1
+        prob += pulp.lpSum(starter_vars[pid] for pid in avail[avail["Pos"] == "DEF"]["id"]) >= 3
+        prob += pulp.lpSum(starter_vars[pid] for pid in avail[avail["Pos"] == "FWD"]["id"]) >= 1
+        prob += pulp.lpSum(starter_vars.values()) == 11
+        
+        # Objective: Maximize starting XI points + 0.1 * bench points
+        prob += pulp.lpSum(
+            starter_vars[pid] * xp_dict[pid] +
+            0.1 * (player_vars[pid] - starter_vars[pid]) * xp_dict[pid]
+            for pid in player_vars
+        )
+
+    # Position constraints for 15-man squad
+    prob += pulp.lpSum(player_vars[pid] for pid in avail[avail["Pos"] == "GKP"]["id"]) == 2
+    prob += pulp.lpSum(player_vars[pid] for pid in avail[avail["Pos"] == "DEF"]["id"]) == 5
+    prob += pulp.lpSum(player_vars[pid] for pid in avail[avail["Pos"] == "MID"]["id"]) == 5
+    prob += pulp.lpSum(player_vars[pid] for pid in avail[avail["Pos"] == "FWD"]["id"]) == 3
+    prob += pulp.lpSum(player_vars.values()) == 15
+    
+    # Team constraints (max 3 per club)
+    for team_id in avail["team_id"].unique():
+        team_pids = avail[avail["team_id"] == team_id]["id"].tolist()
+        prob += pulp.lpSum(player_vars[pid] for pid in team_pids) <= 3
+        
+    # Budget constraint
+    prob += pulp.lpSum(player_vars[pid] * cost_dict[pid] for pid in player_vars) <= team_value
+    
+    # 3. Solver Guardrails & Timeouts
+    prob.solve(pulp.PULP_CBC_CMD(timeLimit=5, gapRel=0.005, msg=False))
+    
+    if pulp.LpStatus[prob.status] != 'Optimal':
+        return current_squad_df.copy(), []
+        
+    selected_pids = [pid for pid in player_vars if pulp.value(player_vars[pid]) > 0.5]
+    final_squad = avail[avail["id"].isin(selected_pids)].copy()
+    
+    final_squad["is_transfer_in"] = ~final_squad["id"].isin(current_squad_df["id"].tolist())
+    final_squad["is_target_in"] = final_squad["id"].isin(target_in_set)
+    
+    paired_transfers = []
+    out_players = current_squad_df[~current_squad_df["id"].isin(selected_pids)].to_dict("records")
+    in_players = final_squad[final_squad["is_transfer_in"]].to_dict("records")
+    
+    for p_out, p_in in zip(out_players, in_players):
+        paired_transfers.append({
+            "out": p_out,
+            "in": p_in,
+            "gain": round(p_in["Horizon_xP"] - p_out.get("Horizon_xP", 0), 1),
+            "cost_diff": round(p_in["Cost"] - p_out.get("Cost", 0), 1),
+            "target": p_in["id"] in target_in_set,
+            "forced_out": p_out["id"] in (force_out_player_ids or []),
+        })
+        
+    return final_squad, paired_transfers
 
 
 def solve_multi_gw_transfers(
@@ -377,73 +757,240 @@ def solve_multi_gw_transfers(
     candidate_league_df: pd.DataFrame,
     bank: float,
     num_transfers: int,
-    locked_player_ids: list,
+    locked_player_ids: list = None,
+    target_in_player_ids: list = None,
+    force_out_player_ids: list = None,
+    blocked_in_player_ids: list = None,
+    min_avg_minutes: float = 30.0,
 ) -> tuple[pd.DataFrame, list[dict]]:
+    if num_transfers <= 0 or current_squad_df.empty:
+        curr = current_squad_df.copy()
+        curr["is_target_in"] = False
+        return curr, []
+
     curr_squad = current_squad_df.copy()
     curr_ids = set(curr_squad["id"].tolist())
-    avail_cands = candidate_league_df[~candidate_league_df["id"].isin(curr_ids)].copy()
+    locked_set = set(locked_player_ids or [])
+    blocked_in_set = set(blocked_in_player_ids or [])
+    target_in_set = set(target_in_player_ids or []) - blocked_in_set
+    force_out_set = (set(force_out_player_ids or []) & curr_ids) - locked_set
 
-    filtered_cands = []
+    avail_cands = candidate_league_df[
+        (~candidate_league_df["id"].isin(curr_ids)) &
+        (~candidate_league_df["id"].isin(blocked_in_set)) &
+        ((candidate_league_df["avg_mins"] >= min_avg_minutes) | (candidate_league_df["id"].isin(target_in_set)))
+    ].copy()
+
+    if target_in_set and "Target_Horizon_xP" in avail_cands.columns:
+        t_mask = avail_cands["id"].isin(target_in_set)
+        avail_cands.loc[t_mask, "Horizon_xP"] = avail_cands.loc[t_mask, "Target_Horizon_xP"]
+        avail_cands.loc[t_mask, "Proj_Pts"] = avail_cands.loc[t_mask, "Target_Horizon_xP"]
+        for col in avail_cands.columns:
+            if col.startswith("Target_GW"):
+                gw_col = col.replace("Target_", "")
+                if gw_col in avail_cands.columns:
+                    avail_cands.loc[t_mask, gw_col] = avail_cands.loc[t_mask, col]
+
+    top_cand_list = []
     for pos in ["GKP", "DEF", "MID", "FWD"]:
         pos_df = avail_cands[avail_cands["Pos"] == pos]
-        filtered_cands.append(pos_df.sort_values(by="Horizon_xP", ascending=False).head(18))
-    top_candidates = pd.concat(filtered_cands, ignore_index=True)
+        if pos_df.empty:
+            continue
+        prem_cutoff = 8.5 if pos in ["MID", "FWD"] else 5.5
+        mid_min = 6.5 if pos in ["MID", "FWD"] else 4.5
+        prem_df = pos_df[pos_df["Cost"] >= prem_cutoff].sort_values(by="Horizon_xP", ascending=False).head(18)
+        mid_df = pos_df[(pos_df["Cost"] >= mid_min) & (pos_df["Cost"] < prem_cutoff)].sort_values(by="Horizon_xP", ascending=False).head(18)
+        bud_df = pos_df[pos_df["Cost"] < mid_min].sort_values(by="Horizon_xP", ascending=False).head(12)
 
-    curr_bank = bank
-    transfers_made = []
-    new_in_ids = set()
+        top_raw = pos_df.sort_values(by="Horizon_xP", ascending=False).head(8)
+        pos_combined = pd.concat([prem_df, mid_df, bud_df, top_raw]).drop_duplicates(subset=["id"])
+        top_cand_list.append(pos_combined)
 
-    for _ in range(num_transfers):
-        base_xi, _, _ = solve_optimal_xi(curr_squad)
-        base_xp = base_xi["Proj_Pts"].sum()
+    if target_in_set:
+        targets_df = avail_cands[avail_cands["id"].isin(target_in_set)]
+        top_cand_list.append(targets_df)
 
-        best_gain = 0.0
-        best_swap = None
-        best_squad = None
-        team_counts = curr_squad["team_id"].value_counts().to_dict()
+    top_candidates = pd.concat(top_cand_list, ignore_index=True).drop_duplicates(subset=["id"])
 
-        for _, p_out in curr_squad.iterrows():
-            if p_out["id"] in locked_player_ids:
+    base_xi, _, _ = solve_optimal_xi(curr_squad)
+    base_xp = base_xi["Proj_Pts"].sum()
+
+    eligible_out_ids = [pid for pid in curr_squad["id"].tolist() if pid not in locked_set]
+    forced_out_list = [pid for pid in force_out_set if pid in eligible_out_ids]
+    
+    min_k = max(1, min(len(forced_out_list), num_transfers))
+    
+    best_overall_plan = None
+    best_eval_score = -999.0
+    best_starting_gain = 0.0
+
+    for k in range(min_k, num_transfers + 1):
+        non_forced_outs = [pid for pid in eligible_out_ids if pid not in forced_out_list]
+        needed_others = k - len(forced_out_list)
+        if needed_others < 0:
+            continue
+
+        out_combos = []
+        if needed_others == 0:
+            out_combos = [tuple(forced_out_list)]
+        else:
+            for other_combo in itertools.combinations(non_forced_outs, needed_others):
+                out_combos.append(tuple(forced_out_list) + other_combo)
+
+        for out_ids_tuple in out_combos:
+            out_players = curr_squad[curr_squad["id"].isin(out_ids_tuple)]
+            out_pos_counts = Counter(out_players["Pos"].tolist())
+            out_cost_total = out_players["Cost"].sum()
+            budget_available = out_cost_total + bank
+
+            remaining_squad = curr_squad[~curr_squad["id"].isin(out_ids_tuple)]
+            base_team_counts = remaining_squad["team_id"].value_counts().to_dict()
+
+            pos_cand_lists = []
+            for pos, count in out_pos_counts.items():
+                pos_cands = top_candidates[top_candidates["Pos"] == pos]
+                target_pos_cands = pos_cands[pos_cands["id"].isin(target_in_set)]
+                other_pos_cands = pos_cands[~pos_cands["id"].isin(target_in_set)].sort_values(by="Horizon_xP", ascending=False).head(12)
+                combined_pos = pd.concat([target_pos_cands, other_pos_cands]).drop_duplicates(subset=["id"])
+                pos_cand_lists.append(list(itertools.combinations(combined_pos.to_dict("records"), count)))
+
+            candidate_in_combos = []
+            # Pre-convert remaining_squad to dicts once per out_combo for _fast_xi_xp
+            remaining_records = remaining_squad.to_dict("records")
+
+            for in_prod in itertools.product(*pos_cand_lists):
+                in_players_flat = [p for sub in in_prod for p in sub]
+                in_ids = [p["id"] for p in in_players_flat]
+                if len(set(in_ids)) != len(in_ids):
+                    continue
+
+                in_cost_total = sum(p["Cost"] for p in in_players_flat)
+                if in_cost_total > (budget_available + 1e-5):
+                    continue
+
+                temp_team_counts = dict(base_team_counts)
+                team_valid = True
+                for p in in_players_flat:
+                    tid = p["team_id"]
+                    temp_team_counts[tid] = temp_team_counts.get(tid, 0) + 1
+                    if temp_team_counts[tid] > 3:
+                        team_valid = False
+                        break
+                if not team_valid:
+                    continue
+
+                quick_xp = sum(p["Horizon_xP"] for p in in_players_flat) - out_players["Horizon_xP"].sum()
+                target_bonus = sum(25.0 for pid in in_ids if pid in target_in_set)
+                heuristic_score = quick_xp + (0.35 * in_cost_total) + target_bonus
+                candidate_in_combos.append((heuristic_score, in_players_flat, out_players))
+
+            if not candidate_in_combos:
                 continue
 
-            pos_cands = top_candidates[top_candidates["Pos"] == p_out["Pos"]]
-            for _, p_in in pos_cands.iterrows():
-                if p_in["id"] in curr_squad["id"].values:
-                    continue
-                cost_diff = p_in["Cost"] - p_out["Cost"]
-                if cost_diff > curr_bank:
-                    continue
-                cand_team = p_in["team_id"]
-                out_team = p_out["team_id"]
-                if cand_team != out_team and team_counts.get(cand_team, 0) >= 3:
-                    continue
+            candidate_in_combos.sort(key=lambda x: x[0], reverse=True)
+            top_to_eval = candidate_in_combos[:80]
 
-                temp_squad = curr_squad[curr_squad["id"] != p_out["id"]].copy()
-                temp_squad = pd.concat([temp_squad, pd.DataFrame([p_in])], ignore_index=True)
-                temp_xi, _, _ = solve_optimal_xi(temp_squad)
-                gain = temp_xi["Proj_Pts"].sum() - base_xp
+            # ── Fast scoring: use dict-based _fast_xi_xp instead of solve_optimal_xi ──
+            # This avoids 80 DataFrame constructions + 80 sort passes; only the final
+            # winner gets a proper solve_optimal_xi call below.
+            for heuristic_score, in_players_flat, out_p_df in top_to_eval:
+                # Approximate starting xP via dict-based greedy (mirrors solve_optimal_xi logic)
+                new_starting_xp = _fast_xi_xp(remaining_records + in_players_flat)
+                # Bench xP approximation: total squad xP minus starting xP
+                total_squad_xp = (
+                    sum(p.get("Horizon_xP", 0) for p in remaining_records)
+                    + sum(p.get("Horizon_xP", 0) for p in in_players_flat)
+                )
+                new_bench_xp = max(0.0, total_squad_xp - new_starting_xp)
 
-                if gain > best_gain:
-                    best_gain = gain
-                    best_swap = (p_out, p_in, cost_diff)
-                    best_squad = temp_squad
+                starting_gain = new_starting_xp - base_xp
+                target_matches = sum(1 for p in in_players_flat if p["id"] in target_in_set)
 
-        if best_swap and best_gain > 0.05:
-            p_out, p_in, cost_diff = best_swap
-            curr_squad = best_squad
-            curr_bank -= cost_diff
-            new_in_ids.add(p_in["id"])
-            transfers_made.append({
-                "out": p_out,
-                "in": p_in,
-                "gain": round(best_gain, 1),
-                "cost_diff": round(cost_diff, 1),
-            })
-        else:
-            break
+                # Bonus score rewards investment on the pitch, not the bench.
+                # Use _fast_xi_player_set to identify which incoming players start.
+                _starter_ids = _fast_xi_player_set(remaining_records + in_players_flat)
+                reinvested_starting_cost = sum(
+                    p.get("Cost", 0) for p in in_players_flat if p["id"] in _starter_ids
+                )
 
-    curr_squad["is_transfer_in"] = curr_squad["id"].map(lambda x: x in new_in_ids)
-    return curr_squad, transfers_made
+                eval_score = (
+                    (new_starting_xp * 1.0)
+                    + (0.10 * new_bench_xp)
+                    + (0.05 * reinvested_starting_cost)
+                    + (target_matches * 15.0)
+                )
+
+                if best_overall_plan is None or eval_score > best_eval_score:
+                    best_eval_score = eval_score
+                    best_starting_gain = starting_gain
+                    best_overall_plan = {
+                        "out_players": out_p_df,
+                        "in_players": in_players_flat,
+                        # Defer DataFrame construction until we know the winner
+                        "remaining_squad": remaining_squad,
+                        "budget_available": budget_available,
+                        "starting_gain": starting_gain,
+                        "target_matches": target_matches,
+                    }
+
+    if best_overall_plan is None:
+        curr = current_squad_df.copy()
+        curr["is_transfer_in"] = False
+        curr["is_target_in"] = False
+        return curr, []
+
+    refined_in_players, _leftover_after_refine = _maximize_leftover_budget(
+        best_overall_plan["in_players"],
+        best_overall_plan["remaining_squad"],
+        best_overall_plan["budget_available"],
+        avail_cands,
+        target_in_set,
+    )
+    
+    refined_squad = pd.concat(
+        [best_overall_plan["remaining_squad"], pd.DataFrame(refined_in_players)],
+        ignore_index=True
+    )
+    refined_xi, refined_bench, _ = solve_optimal_xi(refined_squad)
+    best_overall_plan["in_players"] = refined_in_players
+    best_overall_plan["starting_gain"] = refined_xi["Proj_Pts"].sum() - base_xp
+    best_overall_plan["target_matches"] = sum(
+        1 for p in refined_in_players if p["id"] in target_in_set
+    )
+    best_overall_plan["new_squad"] = refined_squad
+
+    out_df = best_overall_plan["out_players"].sort_values(by="Cost", ascending=False)
+    in_df = pd.DataFrame(best_overall_plan["in_players"]).sort_values(by="Cost", ascending=False)
+
+    paired_transfers = []
+    used_in = set()
+    for _, p_out in out_df.iterrows():
+        match_in = in_df[(in_df["Pos"] == p_out["Pos"]) & (~in_df["id"].isin(used_in))]
+        if match_in.empty:
+            match_in = in_df[~in_df["id"].isin(used_in)]
+        p_in = match_in.iloc[0]
+        used_in.add(p_in["id"])
+
+        cost_diff = p_in["Cost"] - p_out["Cost"]
+        xp_gain = p_in["Horizon_xP"] - p_out["Horizon_xP"]
+        is_target = p_in["id"] in target_in_set
+        is_forced = p_out["id"] in force_out_set
+
+        paired_transfers.append({
+            "out": p_out,
+            "in": p_in,
+            "gain": round(xp_gain, 1),
+            "cost_diff": round(cost_diff, 1),
+            "target": is_target,
+            "forced_out": is_forced,
+        })
+
+    final_squad = best_overall_plan["new_squad"].copy()
+    new_in_ids = {p["id"] for p in best_overall_plan["in_players"]}
+    final_squad["is_transfer_in"] = final_squad["id"].isin(new_in_ids)
+    final_squad["is_target_in"] = final_squad["id"].map(lambda x: x in target_in_set and x in new_in_ids)
+
+    return final_squad, paired_transfers
 
 
 def prepare_xi_display(xi_df: pd.DataFrame, bench_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -498,6 +1045,7 @@ def render_transfer_pitch_component(
             is_c = (p.get("is_cap") is True or p.get("is_cap") == 1) or mult >= 2
             is_v = (p.get("is_vc") is True or p.get("is_vc") == 1) and not is_c
             is_in = bool(p.get("is_transfer_in") is True)
+            is_target = bool(p.get("is_target_in") is True)
             is_out = bool(p.get("is_transfer_out") is True)
 
             cap_badge = ""
@@ -505,6 +1053,8 @@ def render_transfer_pitch_component(
                 cap_badge = '<div class="pitch-cap-badge c">C</div>'
             elif is_v:
                 cap_badge = '<div class="pitch-cap-badge vc">V</div>'
+            elif is_target:
+                cap_badge = '<div class="pitch-cap-badge" style="background:#0284c7; color:#ffffff; font-size:0.55rem; width:18px; height:18px;">🎯</div>'
             elif is_in:
                 cap_badge = '<div class="pitch-cap-badge" style="background:#10b981; color:#ffffff; font-size:0.58rem; width:18px; height:18px;">IN</div>'
             elif is_out:
@@ -517,8 +1067,11 @@ def render_transfer_pitch_component(
             cost = p.get("Cost", 0.0)
             cost_str = f"£{fmt_num(cost, '.1f')}m" if cost else ""
             mult_txt = f" ({mult}x)" if mult > 1 else ""
+
             tag = ""
-            if is_in:
+            if is_target:
+                tag = '<span style="color:#38bdf8; font-weight:800; font-size:0.58rem;"> [🎯 TARGET]</span>'
+            elif is_in:
                 tag = '<span style="color:#34d399; font-weight:800; font-size:0.58rem;"> [IN]</span>'
             elif is_out:
                 tag = '<span style="color:#f87171; font-weight:800; font-size:0.58rem;"> [OUT]</span>'
@@ -553,19 +1106,25 @@ def render_transfer_pitch_component(
             player_name = b.get("Player", "")
             pos = b.get("Pos", "")
             is_b_in = bool(b.get("is_transfer_in") is True)
+            is_b_target = bool(b.get("is_target_in") is True)
             is_b_out = bool(b.get("is_transfer_out") is True)
 
-            bench_in_badge = ""
-            if is_b_in:
-                bench_in_badge = '<div class="pitch-cap-badge" style="background:#10b981; color:#ffffff; font-size:0.58rem; width:18px; height:18px;">IN</div>'
+            bench_badge = ""
+            if is_b_target:
+                bench_badge = '<div class="pitch-cap-badge" style="background:#0284c7; color:#ffffff; font-size:0.55rem; width:18px; height:18px;">🎯</div>'
+            elif is_b_in:
+                bench_badge = '<div class="pitch-cap-badge" style="background:#10b981; color:#ffffff; font-size:0.58rem; width:18px; height:18px;">IN</div>'
             elif is_b_out:
-                bench_in_badge = '<div class="pitch-cap-badge" style="background:#ef4444; color:#ffffff; font-size:0.58rem; width:18px; height:18px;">OUT</div>'
+                bench_badge = '<div class="pitch-cap-badge" style="background:#ef4444; color:#ffffff; font-size:0.58rem; width:18px; height:18px;">OUT</div>'
 
             proj = b.get("Horizon_xP", b.get("Proj_Pts", 0.0))
             b_cost = b.get("Cost", 0.0)
             b_cost_str = f"£{fmt_num(b_cost, '.1f')}m" if b_cost else ""
+
             b_tag = ""
-            if is_b_in:
+            if is_b_target:
+                b_tag = '<span style="color:#38bdf8; font-weight:800; font-size:0.58rem;"> [🎯 TARGET]</span>'
+            elif is_b_in:
                 b_tag = '<span style="color:#34d399; font-weight:800; font-size:0.58rem;"> [IN]</span>'
             elif is_b_out:
                 b_tag = '<span style="color:#f87171; font-weight:800; font-size:0.58rem;"> [OUT]</span>'
@@ -586,7 +1145,7 @@ def render_transfer_pitch_component(
                 f'<div class="bench-order-tag">{sub_label}</div>'
                 f'<div class="pitch-avatar-wrap">'
                 f'<div class="pitch-player-avatar bench-avatar" style="{bench_avatar_style}"></div>'
-                f'{bench_in_badge}'
+                f'{bench_badge}'
                 f'</div>'
                 f'<div class="pitch-name-pill">{html.escape(player_name)}</div>'
                 f'<div class="pitch-stat-pill">{b_stat_content}</div>'
@@ -727,8 +1286,8 @@ def render_transfer_pitch_component(
 
 def render_transfer_analyzer_tab(conn, events_df, current_gw):
     section_header(
-        "Transfer Planner & Solver",
-        "Formulate optimal multi-gameweek transfer routes with custom player locking and budget management",
+        "Transfer Planner & Horizon Solver",
+        "Formulate optimal multi-gameweek transfer routes with customized player locking and budget management",
     )
 
     mgr_to_use = st.session_state.get("manager_id", "").strip()
@@ -758,33 +1317,109 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
     calc_ft = calculate_available_fts(mgr_history)
 
-    st.markdown("### ⚙️ Optimization Horizon & Controls")
-    c1, c2, c3, c4 = st.columns([1.5, 1.1, 1.1, 1.8])
-    with c1:
+    # ── Horizon & Transfer Parameters ─────────────────────────────────────────
+    st.markdown("#### ⚙️ Parameters & Horizon")
+
+    if pick_ids:
+        placeholders = ",".join(["?"] * len(pick_ids))
+        cur = conn.cursor()
+        cur.execute(f"SELECT SUM(now_cost) FROM players WHERE id IN ({placeholders})", pick_ids)
+        squad_sell = round((cur.fetchone()[0] or 1000) / 10.0, 1)
+    else:
+        squad_sell = 100.0
+    itb_val = entry_hist.get("bank", mgr_data.get("last_deadline_bank", 0)) / 10.0
+    team_val = round(squad_sell + itb_val, 1)
+
+    chip_mode = st.radio("Strategy Mode:", ["Regular Transfers", "🃏 Wildcard", "⚡ Free Hit"], horizontal=True, index=0)
+
+
+    
+
+    if chip_mode == "Regular Transfers":
+
+        c1, c2, c3, c4 = st.columns([1.6, 1.0, 1.0, 1.4], vertical_alignment="bottom")
+
+        with c1:
+
+            horizon_gws = st.selectbox(
+
+                "Evaluation Horizon",
+
+                options=[1, 2, 3, 5],
+
+                format_func=lambda x: f"Next {x} Gameweek{'s' if x > 1 else ''} (GW{next_gw}–GW{next_gw + x - 1})",
+
+                index=2,
+
+            )
+
+        with c2:
+
+            ft_selected = st.number_input("Free Transfers", min_value=1, max_value=5, value=calc_ft, step=1)
+
+        with c3:
+
+            max_hits = st.number_input("Max Hits (-4)", min_value=0, max_value=5, value=0, step=1)
+
+        with c4:
+
+            total_allowed_transfers = int(ft_selected + max_hits)
+
+            hit_cost_str = f"(-{max_hits * 4} pts)" if max_hits > 0 else "(0 pts)"
+
+            st.metric("Planned Moves", f"{total_allowed_transfers} Transfers", delta=hit_cost_str if max_hits > 0 else None, delta_color="inverse")
+
+    elif chip_mode == "🃏 Wildcard":
+
         horizon_gws = st.selectbox(
+
             "Evaluation Horizon",
-            options=[1, 2, 3, 5],
-            format_func=lambda x: f"Next {x} Gameweek{'s' if x > 1 else ''} (GW{next_gw}–GW{next_gw + x - 1})",
+
+            options=[3, 5, 8],
+
+            format_func=lambda x: f"Next {x} Gameweeks (GW{next_gw}–GW{next_gw + x - 1})",
+
             index=1,
-        )
-    with c2:
-        ft_selected = st.number_input("Free Transfers", min_value=0, max_value=5, value=calc_ft, step=1)
-    with c3:
-        max_hits = st.number_input("Max Hits (-4)", min_value=0, max_value=4, value=0, step=1)
-    with c4:
-        total_allowed_transfers = int(ft_selected + max_hits)
-        st.markdown(
-            f"""
-            <div style="margin-top: 24px; padding: 6px 12px; background: rgba(30,41,59,0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;">
-                <span style="font-size: 0.78rem; color: #94a3b8;">Planned Moves:</span>
-                <strong style="color: #38bdf8;"> {total_allowed_transfers} Transfers</strong> 
-                <span style="font-size: 0.75rem; color: #f87171;">(-{max_hits * 4} pts)</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
+
         )
 
-    col_tgl1, col_tgl2, col_tgl3, col_tgl4 = st.columns([1.5, 1.8, 1.6, 1.2])
+        ft_selected = 15
+
+        max_hits = 0
+
+        total_allowed_transfers = 15
+
+        st.info("🃏 **Wildcard Active**: Optimizing a permanent 15-man squad over the selected horizon with 0 point deductions.")
+
+
+        st.metric("Available Budget", f"£{team_val:.1f}m", help=f"Squad Sell Value: £{squad_sell:.1f}m | ITB: £{itb_val:.1f}m")
+
+
+        st.caption(f"Squad Sell Value: £{squad_sell:.1f}m | In The Bank: £{itb_val:.1f}m")
+
+    else:
+
+        horizon_gws = 1
+
+        st.markdown("**Evaluation Horizon:** Next 1 Gameweek (Locked for Free Hit)")
+
+        ft_selected = 15
+
+        max_hits = 0
+
+        total_allowed_transfers = 15
+
+        st.info("⚡ **Free Hit Active**: Optimizing a single-gameweek £100m+ roster with 0 point deductions. Reverts automatically next gameweek.")
+
+
+        st.metric("Available Budget", f"£{team_val:.1f}m", help=f"Squad Sell Value: £{squad_sell:.1f}m | ITB: £{itb_val:.1f}m")
+
+
+        st.caption(f"Squad Sell Value: £{squad_sell:.1f}m | In The Bank: £{itb_val:.1f}m")
+
+
+    # ── View & Model Controls ─────────────────────────────────────────────────
+    col_tgl1, col_tgl2, col_tgl3, col_tgl4 = st.columns([1.3, 1.6, 1.4, 1.7], vertical_alignment="center")
     with col_tgl1:
         pitch_view = st.toggle("🏟️ **Pitch View**", value=True, key="transfer_pitch_toggle")
     with col_tgl2:
@@ -799,12 +1434,16 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                 value=0.35,
                 step=0.05,
                 key="transfer_mkt_weight",
-                help="0.0 = 100% Model | 1.0 = 100% Betting Odds",
             )
     with col_tgl4:
-        factor_movement = True
-        if enable_betting:
-            factor_movement = st.checkbox("⚡ Movement", value=True, key="transfer_factor_movement")
+        min_avg_mins = st.slider(
+            "⏱️ Min Avg Mins / GW",
+            min_value=0,
+            max_value=90,
+            value=45,
+            step=5,
+            help="Filters out fringe players and cameo risks from transfer suggestions",
+        )
 
     placeholders = ",".join(["?"] * len(pick_ids))
     squad_query = f"""
@@ -820,38 +1459,154 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
     """
     squad_df = pd.read_sql(squad_query, conn, params=pick_ids)
 
-    locked_players = st.multiselect(
-        "🔒 Lock Key Players (Will NOT be transferred out)",
-        options=squad_df["id"].tolist(),
-        format_func=lambda pid: f"{squad_df.loc[squad_df['id'] == pid, 'Player'].values[0]} ({squad_df.loc[squad_df['id'] == pid, 'Team'].values[0]})",
-        default=[],
-    )
-
-    loader = st.empty()
-    with loader.container():
-        render_optimizer_status(
-            title="Solving optimal transfer path...",
-            subtext=f"Evaluating multi-gameweek projections across GW{next_gw} to GW{next_gw + horizon_gws - 1}...",
-        )
-        render_skeleton_cards(count=1)
-
     league_eval_df = evaluate_league_multi_gw(
         conn,
         next_gw,
         horizon_gws,
         enable_betting=enable_betting,
         market_weight=market_weight,
-        factor_movement=factor_movement,
+        factor_movement=True,
     )
-    curr_squad_horizon = league_eval_df[league_eval_df["id"].isin(pick_ids)].copy()
 
-    transferred_squad_df, swaps = solve_multi_gw_transfers(
-        current_squad_df=curr_squad_horizon,
-        candidate_league_df=league_eval_df,
-        bank=bank_balance,
-        num_transfers=total_allowed_transfers,
-        locked_player_ids=locked_players,
-    )
+    # Broad eligibility mask for the UI dropdown pool: allows ANY active player
+    # so that returning stars with status='i' or 'd' always appear in the search box.
+    _is_ui_available = (league_eval_df["can_select"] == 1) & (league_eval_df["Status"] != 'u')
+    _not_in_squad = ~league_eval_df["id"].isin(pick_ids)
+
+    # UI dropdown pool: NO avg_mins gate.
+    available_market_df = league_eval_df[
+        _not_in_squad & _is_ui_available
+    ].sort_values(by="Horizon_xP", ascending=False)
+
+    # Solver candidate pool: We just pass available_market_df.
+    # The solver internally uses min_avg_minutes to filter non-targets.
+    solver_candidate_df = available_market_df.copy()
+
+
+    # ── Option Dictionaries for Consolidated Boxes ────────────────────────────
+    pos_options = []
+    pos_labels = {}
+    for _, r in squad_df.iterrows():
+        key = f"lock_{r['id']}"
+        pos_options.append(key)
+        pos_labels[key] = f"🔒 Keep: {r['Player']} ({r['Team']} · {r['Pos']})"
+
+    for _, r in available_market_df.iterrows():
+        key = f"target_{r['id']}"
+        pos_options.append(key)
+        pos_labels[key] = f"🎯 Target: {r['Player']} ({r['Team']} · {r['Pos']} · £{r['Cost']:.1f}m · {r['Horizon_xP']:.1f} xP)"
+
+    neg_options = []
+    neg_labels = {}
+    for _, r in squad_df.iterrows():
+        key = f"sell_{r['id']}"
+        neg_options.append(key)
+        neg_labels[key] = f"🔴 Sell: {r['Player']} ({r['Team']} · {r['Pos']})"
+
+    for _, r in available_market_df.iterrows():
+        key = f"block_{r['id']}"
+        neg_options.append(key)
+        neg_labels[key] = f"⛔ Blacklist: {r['Player']} ({r['Team']} · {r['Pos']} · £{r['Cost']:.1f}m)"
+    col_pos, col_neg = st.columns(2)
+    with col_pos:
+        selected_positive = st.multiselect(
+            "✅ Priorities & Locks",
+            options=pos_options,
+            format_func=lambda k: pos_labels.get(k, k),
+            default=[],
+            help="Select squad players you want to lock and market players you want to prioritize buying.",
+        )
+        locked_players = [int(k.replace("lock_", "")) for k in selected_positive if k.startswith("lock_")]
+        targeted_in_players = [int(k.replace("target_", "")) for k in selected_positive if k.startswith("target_")]
+
+    with col_neg:
+        selected_negative = st.multiselect(
+            "❌ Forced Sales & Blacklist",
+            options=neg_options,
+            format_func=lambda k: neg_labels.get(k, k),
+            default=[],
+            help="Select squad players you must sell and market players you refuse to buy."
+        )
+        force_out_players = [int(k.replace("sell_", "")) for k in selected_negative if k.startswith("sell_")]
+        blocked_in_players = [int(k.replace("block_", "")) for k in selected_negative if k.startswith("block_")]
+
+        if targeted_in_players and len(targeted_in_players) > total_allowed_transfers:
+            st.warning(
+                f"⚠️ You targeted {len(targeted_in_players)} players, but only have {total_allowed_transfers} transfer(s) planned. Targets will be prioritized up to your limit."
+            )
+
+        submit_solve = st.button("🚀 Solve Transfers", width='stretch', type="primary")
+
+    state_key = f"transfer_solve_{mgr_to_use}_{chip_mode}_{horizon_gws}_{ft_selected}_{max_hits}_{market_weight}"
+    results_slot = st.empty()
+
+    if submit_solve:
+        with results_slot.container():
+            render_optimizer_status(
+                title="Solving optimal transfer path...",
+                subtext=f"Evaluating multi-gameweek projections across GW{next_gw} to GW{next_gw + horizon_gws - 1}...",
+            )
+            render_skeleton_cards(count=1)
+
+        curr_squad_horizon = league_eval_df[league_eval_df["id"].isin(pick_ids)].copy()
+
+        # Squad guarantee: if any pick is absent from league_eval_df (player departed the
+        # league, status='u' with no DB row, etc.), fetch them directly and add zero-xP
+        # stub rows so all 15 positions are represented and the optimizer can flag them.
+        _missing_pick_ids = set(pick_ids) - set(curr_squad_horizon["id"].tolist())
+        if _missing_pick_ids:
+            _miss_ph = ",".join(["?"] * len(_missing_pick_ids))
+            _missing_df = pd.read_sql(
+                f"""SELECT p.id, p.code, p.photo, p.web_name AS Player, p.team AS team_id,
+                       t.short_name AS Team,
+                       CASE p.element_type WHEN 1 THEN 'GKP' WHEN 2 THEN 'DEF'
+                           WHEN 3 THEN 'MID' WHEN 4 THEN 'FWD' END AS Pos,
+                       p.now_cost / 10.0 AS Cost, p.minutes AS minutes,
+                       p.total_points AS Season_Points, p.form AS Form,
+                       p.points_per_game AS PPG, p.status AS Status,
+                       p.chance_of_playing_next_round AS Chance, p.news AS News
+                FROM players p INNER JOIN teams t ON p.team = t.id
+                WHERE p.id IN ({_miss_ph})""",
+                conn,
+                params=list(_missing_pick_ids),
+            )
+            for _col in ["avg_mins", "Horizon_xP", "Proj_Pts", "Avg_xP"]:
+                _missing_df[_col] = 0.0
+            for _gw in range(next_gw, next_gw + horizon_gws):
+                _missing_df[f"GW{_gw}"] = 0.0
+            curr_squad_horizon = pd.concat([curr_squad_horizon, _missing_df], ignore_index=True)
+
+        transferred_squad_df, swaps = solve_multi_gw_transfers(
+            current_squad_df=curr_squad_horizon,
+            candidate_league_df=solver_candidate_df,
+            bank=bank_balance,
+            num_transfers=total_allowed_transfers,
+            locked_player_ids=locked_players,
+            target_in_player_ids=targeted_in_players,
+            force_out_player_ids=force_out_players,
+            blocked_in_player_ids=blocked_in_players,
+            min_avg_minutes=min_avg_mins,
+        )
+
+        st.session_state[state_key] = {
+            "transferred_squad_df": transferred_squad_df,
+            "swaps": swaps,
+            "curr_squad_horizon": curr_squad_horizon,
+            "locked_players": locked_players,
+            "targeted_in_players": targeted_in_players
+        }
+        results_slot.empty()
+
+    if state_key not in st.session_state:
+        st.info("👆 Adjust settings and click 'Solve Transfers' to begin.")
+        return
+
+    res = st.session_state[state_key]
+    transferred_squad_df = res["transferred_squad_df"]
+    swaps = res["swaps"]
+    curr_squad_horizon = res["curr_squad_horizon"]
+    locked_players = res["locked_players"]
+    targeted_in_players = res["targeted_in_players"]
 
     out_ids = {s["out"]["id"] for s in swaps}
     in_ids = {s["in"]["id"] for s in swaps}
@@ -869,141 +1624,221 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
     trans_pts = trans_xi["Horizon_xP"].sum()
     net_pts_gain = (trans_pts - base_pts) - (max_hits * 4)
 
-    loader.empty()
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric(f"Starting XI {horizon_gws}-GW xP", f"{trans_pts:.1f} xP", delta=f"{trans_pts - base_pts:+.1f} Raw xP")
-    m2.metric(
-        "Net Projected Gain",
-        f"{net_pts_gain:+.1f} xP",
-        delta=f"-{max_hits * 4} Hit Penalty" if max_hits > 0 else "Free Transfers",
-    )
-    m3.metric("Remaining In Bank", f"£{(bank_balance - sum(s['cost_diff'] for s in swaps)):.1f}m")
-    m4.metric("Moves Executed", f"{len(swaps)} of {total_allowed_transfers}")
-
-    st.markdown("### 🔄 Recommended Transfer Moves")
-    if not swaps:
-        st.success("✅ Your current squad is optimal for this horizon. No transfer yields higher starting points within your budget.")
-    else:
-        for s in swaps:
-            c_out, c_in, c_delta = st.columns([3, 3, 2])
-            with c_out:
-                st.markdown(
-                    f"""
-                    <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 8px 12px;">
-                        <span style="font-size: 0.72rem; font-weight: 800; color: #f87171;">🔴 TRANSFER OUT</span><br>
-                        <strong>{s['out']['Player']}</strong> ({s['out']['Team']}) · £{s['out']['Cost']:.1f}m<br>
-                        <span style="font-size: 0.78rem; color: #94a3b8;">{horizon_gws}-GW xP: {s['out']['Horizon_xP']:.1f} xP</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-            with c_in:
-                st.markdown(
-                    f"""
-                    <div style="background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 8px; padding: 8px 12px;">
-                        <span style="font-size: 0.72rem; font-weight: 800; color: #4ade80;">🟢 TRANSFER IN</span><br>
-                        <strong>{s['in']['Player']}</strong> ({s['in']['Team']}) · £{s['in']['Cost']:.1f}m<br>
-                        <span style="font-size: 0.78rem; color: #94a3b8;">{horizon_gws}-GW xP: {s['in']['Horizon_xP']:.1f} xP</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-            with c_delta:
-                st.markdown(
-                    f"""
-                    <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 8px 12px; height: 100%; display: flex; flex-direction: column; justify-content: center;">
-                        <span style="font-size: 0.72rem; color: #94a3b8;">Expected Gain:</span>
-                        <span style="font-size: 1.1rem; font-weight: 800; color: #38bdf8;">+{s['gain']:.1f} xP</span>
-                        <span style="font-size: 0.72rem; color: #64748b;">Cost: {s['cost_diff']:+.1f}m</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-            st.markdown("<div style='margin-bottom: 6px;'></div>", unsafe_allow_html=True)
-
-    st.markdown("### ⚖️ Squad Visual Comparison (Current vs Transfer)")
-    col_left, col_right = st.columns(2)
-    with col_left:
-        st.markdown(
-            f"""
-            <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">👤 Current Squad ({horizon_gws}-GW Run)</span>
-                <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({base_formation} · {base_pts:.1f} xP)</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    with results_slot.container():
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric(f"Starting XI {horizon_gws}-GW xP", f"{trans_pts:.1f} xP", delta=f"{trans_pts - base_pts:+.1f} Raw xP")
+        m2.metric(
+            "Net Projected Gain",
+            f"{net_pts_gain:+.1f} xP",
+            delta=f"-{max_hits * 4} Hit Penalty" if max_hits > 0 else "Free Transfers",
         )
-        if pitch_view:
-            render_transfer_pitch_component(
-                base_xi,
-                base_bench,
-                rolling_df=rolling_metrics_df,
-                fdr_map=teams_fdr_map,
-                horizon_len=horizon_gws,
-            )
-        else:
-            for idx, (_, row) in enumerate(base_xi.iterrows()):
-                tags = [(row["Pos"], "blue")]
-                if bool(row.get("is_transfer_out") is True):
-                    tags.append(("Transfer Out", "red"))
-                if row.get("is_cap") is True:
-                    tags.append(("Captain", "green"))
-                elif row.get("is_vc") is True:
-                    tags.append(("Vice Captain", "yellow"))
-                render_list_card(
-                    f"{row['Player']} · {row['Team']}",
-                    tags,
-                    f'<span>Horizon xP</span> <strong>{fmt_num(row["Horizon_xP"], ".1f")}</strong> · <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
-                    img_url=get_player_img_url(row.get("photo"), row.get("code")),
-                )
+        m3.metric("Remaining In Bank", f"£{(bank_balance - sum(s['cost_diff'] for s in swaps)):.1f}m")
+        m4.metric("Moves Executed", f"{len(swaps)} of {total_allowed_transfers}")
 
-    with col_right:
-        st.markdown(
-            f"""
-            <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">🔄 Transfer Squad ({horizon_gws}-GW Run)</span>
-                <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({trans_formation} · {trans_pts:.1f} xP)</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        if chip_mode == "🃏 Wildcard":
+
+
+            st.markdown("### 🃏 Optimal Wildcard Squad (Permanent Overhaul, 0 Hits)")
+
+
+        elif chip_mode == "⚡ Free Hit":
+
+
+            st.markdown("### ⚡ Optimal Free Hit Squad (1-Week Maximum Ceiling, 0 Hits)")
+
+
+        else:
+
+
+            hit_val = max(0, len(swaps) - calc_ft) * 4
+
+
+            st.markdown(f"### 🎯 Optimal Transfer Route ({len(swaps)} moves, -{hit_val} pts)")
+        if not swaps:
+            st.success("✅ Your current squad is optimal for this horizon. No transfer yields higher starting points within your budget.")
+        else:
+            for s in swaps:
+                c_out, c_in, c_delta = st.columns([3, 3, 2])
+                is_target = s.get("target", False)
+                is_forced = s.get("forced_out", False)
+
+                out_badge_title = "🔴 FORCED SALE" if is_forced else "🔴 TRANSFER OUT"
+                in_badge_title = "🎯 TARGET SIGNING" if is_target else "🟢 TRANSFER IN"
+                in_badge_color = "#38bdf8" if is_target else "#4ade80"
+                in_bg_color = "rgba(56, 189, 248, 0.1)" if is_target else "rgba(34, 197, 94, 0.1)"
+                in_border_color = "rgba(56, 189, 248, 0.35)" if is_target else "rgba(34, 197, 94, 0.3)"
+
+                with c_out:
+                    st.markdown(
+                        f"""
+                        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 8px 12px;">
+                            <span style="font-size: 0.72rem; font-weight: 800; color: #f87171;">{out_badge_title}</span><br>
+                            <strong>{s['out']['Player']}</strong> ({s['out']['Team']}) · £{s['out']['Cost']:.1f}m<br>
+                            <span style="font-size: 0.78rem; color: #94a3b8;">{horizon_gws}-GW xP: {s['out']['Horizon_xP']:.1f} xP</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                with c_in:
+                    st.markdown(
+                        f"""
+                        <div style="background: {in_bg_color}; border: 1px solid {in_border_color}; border-radius: 8px; padding: 8px 12px;">
+                            <span style="font-size: 0.72rem; font-weight: 800; color: {in_badge_color};">{in_badge_title}</span><br>
+                            <strong>{s['in']['Player']}</strong> ({s['in']['Team']}) · £{s['in']['Cost']:.1f}m<br>
+                            <span style="font-size: 0.78rem; color: #94a3b8;">{horizon_gws}-GW xP: {s['in']['Horizon_xP']:.1f} xP</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                with c_delta:
+                    st.markdown(
+                        f"""
+                        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 8px 12px; height: 100%; display: flex; flex-direction: column; justify-content: center;">
+                            <span style="font-size: 0.72rem; color: #94a3b8;">Expected Gain:</span>
+                            <span style="font-size: 1.1rem; font-weight: 800; color: #38bdf8;">{s['gain']:+.1f} xP</span>
+                            <span style="font-size: 0.72rem; color: #64748b;">Cost: {s['cost_diff']:+.1f}m</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                st.markdown("<div style='margin-bottom: 6px;'></div>", unsafe_allow_html=True)
+
+        st.markdown("### ⚖️ Squad Visual Comparison (Current vs Transfer)")
+        is_dark_theme = st.session_state.get("theme_mode", "dark") == "dark"
+        banner_title_col = "#f8fafc" if is_dark_theme else "#0f172a"
+        banner_sub_col = "#94a3b8" if is_dark_theme else "#64748b"
+
+        col_left, col_right = st.columns(2)
+        with col_left:
+            st.markdown(
+                f"""
+                <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    <span style="font-size: 0.92rem; font-weight: 700; color: {banner_title_col};">👤 Current Squad ({horizon_gws}-GW Run)</span>
+                    <span style="font-size: 0.80rem; font-weight: 600; color: {banner_sub_col}; margin-left: 6px;">({base_formation} · {base_pts:.1f} xP)</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if pitch_view:
+                render_transfer_pitch_component(
+                    base_xi,
+                    base_bench,
+                    rolling_df=rolling_metrics_df,
+                    fdr_map=teams_fdr_map,
+                    horizon_len=horizon_gws,
+                )
+            else:
+                for idx, (_, row) in enumerate(base_xi.iterrows()):
+                    tags = [(row["Pos"], "blue")]
+                    if bool(row.get("is_forced_out") is True):
+                        tags.append(("Transfer Out (Forced)", "red"))
+                    elif bool(row.get("is_transfer_out") is True):
+                        tags.append(("Transfer Out", "red"))
+
+                    if row.get("is_cap") is True:
+                        tags.append(("Captain", "green"))
+                    elif row.get("is_vc") is True:
+                        tags.append(("Vice Captain", "yellow"))
+                    render_list_card(
+                        f"{row['Player']} · {row['Team']}",
+                        tags,
+                        f'<span>Horizon xP</span> <strong>{fmt_num(row["Horizon_xP"], ".1f")}</strong> · <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
+                        img_url=get_player_img_url(row.get("photo"), row.get("code")),
+                    )
+                if not base_bench.empty:
+                    st.markdown("##### 🪑 Current Bench")
+                    for idx, (_, row) in enumerate(base_bench.iterrows()):
+                        pos = row.get("Pos", "")
+                        sub_label = "Sub GKP" if pos == "GKP" else f"Sub {idx}"
+                        tags = [(pos, "blue"), (sub_label, "gray")]
+                        if bool(row.get("is_forced_out") is True):
+                            tags.append(("Transfer Out (Forced)", "red"))
+                        elif bool(row.get("is_transfer_out") is True):
+                            tags.append(("Transfer Out", "red"))
+                        render_list_card(
+                            f"{row['Player']} · {row['Team']}",
+                            tags,
+                            f'<span>Horizon xP</span> {fmt_num(row["Horizon_xP"], ".1f")} · <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
+                            img_url=get_player_img_url(row.get("photo"), row.get("code")),
+                        )
+
+        with col_right:
+            st.markdown(
+                f"""
+                <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    <span style="font-size: 0.92rem; font-weight: 700; color: {banner_title_col};">
+
+                    {f"🃏 Optimal Wildcard Squad ({horizon_gws}-GW Run)" if chip_mode == "🃏 Wildcard" else (f"⚡ Optimal Free Hit Squad" if chip_mode == "⚡ Free Hit" else f"🔄 Transfer Squad ({horizon_gws}-GW Run)")}
+
+                    </span>
+                    <span style="font-size: 0.80rem; font-weight: 600; color: {banner_sub_col}; margin-left: 6px;">({trans_formation} · {trans_pts:.1f} xP)</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if pitch_view:
+                render_transfer_pitch_component(
+                    trans_xi,
+                    trans_bench,
+                    rolling_df=rolling_metrics_df,
+                    fdr_map=teams_fdr_map,
+                    horizon_len=horizon_gws,
+                )
+            else:
+                for idx, (_, row) in enumerate(trans_xi.iterrows()):
+                    tags = [(row["Pos"], "blue")]
+                    if bool(row.get("is_target_in") is True):
+                        tags.append(("Target In 🎯", "yellow"))
+                    elif bool(row.get("is_transfer_in") is True):
+                        tags.append(("Transfer In", "green"))
+
+                    if row.get("is_cap") is True:
+                        tags.append(("Captain", "green"))
+                    elif row.get("is_vc") is True:
+                        tags.append(("Vice Captain", "yellow"))
+                    render_list_card(
+                        f"{row['Player']} · {row['Team']}",
+                        tags,
+                        f'<span>Horizon xP</span> <strong>{fmt_num(row["Horizon_xP"], ".1f")}</strong> · <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
+                        img_url=get_player_img_url(row.get("photo"), row.get("code")),
+                    )
+                if not trans_bench.empty:
+                    st.markdown("##### 👥 Transfer Bench")
+                    for idx, (_, row) in enumerate(trans_bench.iterrows()):
+                        pos = row.get("Pos", "")
+                        sub_label = "Sub GKP" if pos == "GKP" else f"Sub {idx}"
+                        tags = [(pos, "blue"), (sub_label, "gray")]
+                        if bool(row.get("is_target_in") is True):
+                            tags.append(("Target In 🎯", "yellow"))
+                        elif bool(row.get("is_transfer_in") is True):
+                            tags.append(("Transfer In", "green"))
+                        render_list_card(
+                            f"{row['Player']} • {row['Team']}",
+                            tags,
+                            f'<span>Horizon xP</span> {fmt_num(row["Horizon_xP"], ".1f")} • <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
+                            img_url=get_player_img_url(row.get("photo"), row.get("code")),
+                        )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("💾 Save Transfer Plan for Simulator", key="save_transfer_sim_btn", type="primary", use_container_width=True):
+                st.toast("Transfer Plan Saved! Navigate to Match Simulator to run scenarios.", icon="✅")
+                
+        st.markdown("### 📋 Multi-Gameweek Performance Ledger")
+        display_ledger = transferred_squad_df.copy()
+        display_ledger["Role"] = display_ledger["id"].map(
+            lambda x: (
+                "Target Signing 🎯"
+                if x in in_ids and x in (targeted_in_players or [])
+                else ("New Signing" if x in in_ids else ("Locked" if x in locked_players else "Retained"))
+            )
         )
-        if pitch_view:
-            render_transfer_pitch_component(
-                trans_xi,
-                trans_bench,
-                rolling_df=rolling_metrics_df,
-                fdr_map=teams_fdr_map,
-                horizon_len=horizon_gws,
-            )
-        else:
-            for idx, (_, row) in enumerate(trans_xi.iterrows()):
-                tags = [(row["Pos"], "blue")]
-                if bool(row.get("is_transfer_in") is True):
-                    tags.append(("Transfer In", "green"))
-                if row.get("is_cap") is True:
-                    tags.append(("Captain", "green"))
-                elif row.get("is_vc") is True:
-                    tags.append(("Vice Captain", "yellow"))
-                render_list_card(
-                    f"{row['Player']} · {row['Team']}",
-                    tags,
-                    f'<span>Horizon xP</span> <strong>{fmt_num(row["Horizon_xP"], ".1f")}</strong> · <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
-                    img_url=get_player_img_url(row.get("photo"), row.get("code")),
-                )
 
-    st.markdown("### 📋 Multi-Gameweek Performance Ledger")
-    display_ledger = transferred_squad_df.copy()
-    display_ledger["Role"] = display_ledger["id"].map(
-        lambda x: "New Signing" if x in in_ids else ("Locked" if x in locked_players else "Retained")
-    )
+        gw_cols = [f"GW{g}" for g in range(next_gw, next_gw + horizon_gws)]
+        cols_to_show = ["Role", "Player", "Team", "Pos", "Cost", "Horizon_xP", "Avg_xP"] + gw_cols
+        cols_to_show = [c for c in cols_to_show if c in display_ledger.columns]
 
-    gw_cols = [f"GW{g}" for g in range(next_gw, next_gw + horizon_gws)]
-    cols_to_show = ["Role", "Player", "Team", "Pos", "Cost", "Horizon_xP", "Avg_xP"] + gw_cols
-    cols_to_show = [c for c in cols_to_show if c in display_ledger.columns]
-
-    st.dataframe(
-        display_ledger[cols_to_show].sort_values(by="Horizon_xP", ascending=False),
-        hide_index=True,
-        use_container_width=True,
-    )
+        st.dataframe(
+            display_ledger[cols_to_show].sort_values(by="Horizon_xP", ascending=False),
+            hide_index=True,
+            width='stretch',
+        )
