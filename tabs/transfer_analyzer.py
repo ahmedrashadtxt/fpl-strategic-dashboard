@@ -155,19 +155,19 @@ def build_player_tooltip(p: pd.Series, horizon_len: int = 1) -> str:
     news_row = ""
     if status != "a" and news and news != "None":
         clean_news = html.escape(news[:40] + ("..." if len(news) > 40 else ""))
-        news_row = f'<div class="tt-row tt-news"><span>:material/warning:  {clean_news}</span></div>'
+        news_row = f'<div class="tt-row tt-news"><span>[!] {clean_news}</span></div>'
 
     transfer_badge_row = ""
     if bool(p.get("is_transfer_in") is True):
         if bool(p.get("is_target_in") is True):
-            transfer_badge_row = '<div class="tt-row" style="color:#38bdf8; font-weight:700;"><span>:material/my_location:  Target Signing</span></div>'
+            transfer_badge_row = '<div class="tt-row" style="color:#38bdf8; font-weight:700;"><span>Target Signing</span></div>'
         else:
-            transfer_badge_row = '<div class="tt-row" style="color:#34d399; font-weight:700;"><span>:material/circle:  Proposed Sign</span></div>'
+            transfer_badge_row = '<div class="tt-row" style="color:#34d399; font-weight:700;"><span>Proposed Sign</span></div>'
     elif bool(p.get("is_transfer_out") is True):
         if bool(p.get("is_forced_out") is True):
-            transfer_badge_row = '<div class="tt-row" style="color:#f87171; font-weight:700;"><span>:material/circle:  Forced Sale</span></div>'
+            transfer_badge_row = '<div class="tt-row" style="color:#f87171; font-weight:700;"><span>Forced Sale</span></div>'
         else:
-            transfer_badge_row = '<div class="tt-row" style="color:#f87171; font-weight:700;"><span>:material/circle:  Proposed Sale</span></div>'
+            transfer_badge_row = '<div class="tt-row" style="color:#f87171; font-weight:700;"><span>Proposed Sale</span></div>'
 
     return (
         f'<div class="player-tooltip-card">'
@@ -1052,7 +1052,7 @@ def render_transfer_pitch_component(
             elif is_v:
                 cap_badge = '<div class="pitch-cap-badge vc">V</div>'
             elif is_target:
-                cap_badge = '<div class="pitch-cap-badge" style="background:#0284c7; color:#ffffff; font-size:0.55rem; width:18px; height:18px;">:material/my_location: </div>'
+                cap_badge = '<div class="pitch-cap-badge" style="background:#0284c7; color:#ffffff; font-size:0.55rem; width:18px; height:18px;">C </div>'
             elif is_in:
                 cap_badge = '<div class="pitch-cap-badge" style="background:#10b981; color:#ffffff; font-size:0.58rem; width:18px; height:18px;">IN</div>'
             elif is_out:
@@ -1068,7 +1068,7 @@ def render_transfer_pitch_component(
 
             tag = ""
             if is_target:
-                tag = '<span style="color:#38bdf8; font-weight:800; font-size:0.58rem;"> [:material/my_location:  TARGET]</span>'
+                tag = '<span style="color:#38bdf8; font-weight:800; font-size:0.58rem;"> [TARGET]</span>'
             elif is_in:
                 tag = '<span style="color:#34d399; font-weight:800; font-size:0.58rem;"> [IN]</span>'
             elif is_out:
@@ -1109,7 +1109,7 @@ def render_transfer_pitch_component(
 
             bench_badge = ""
             if is_b_target:
-                bench_badge = '<div class="pitch-cap-badge" style="background:#0284c7; color:#ffffff; font-size:0.55rem; width:18px; height:18px;">:material/my_location: </div>'
+                bench_badge = '<div class="pitch-cap-badge" style="background:#0284c7; color:#ffffff; font-size:0.55rem; width:18px; height:18px;">B </div>'
             elif is_b_in:
                 bench_badge = '<div class="pitch-cap-badge" style="background:#10b981; color:#ffffff; font-size:0.58rem; width:18px; height:18px;">IN</div>'
             elif is_b_out:
@@ -1121,7 +1121,7 @@ def render_transfer_pitch_component(
 
             b_tag = ""
             if is_b_target:
-                b_tag = '<span style="color:#38bdf8; font-weight:800; font-size:0.58rem;"> [:material/my_location:  TARGET]</span>'
+                b_tag = '<span style="color:#38bdf8; font-weight:800; font-size:0.58rem;"> [TARGET]</span>'
             elif is_b_in:
                 b_tag = '<span style="color:#34d399; font-weight:800; font-size:0.58rem;"> [IN]</span>'
             elif is_b_out:
@@ -1707,7 +1707,8 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             hit_val = max(0, len(swaps) - calc_ft) * 4
 
 
-            st.markdown(f"### :material/my_location:  Optimal Transfer Route ({len(swaps)} moves, -{hit_val} pts)")
+            hit_str = f"-{hit_val} pts" if hit_val > 0 else "0 pts"
+            st.markdown(f"### :material/my_location: Optimal Transfer Route ({len(swaps)} moves, {hit_str})")
         if not swaps:
             st.success(":material/check_circle:  Your current squad is optimal for this horizon. No transfer yields higher starting points within your budget.")
         else:
@@ -1716,8 +1717,8 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                 is_target = s.get("target", False)
                 is_forced = s.get("forced_out", False)
 
-                out_badge_title = ":material/circle:  FORCED SALE" if is_forced else ":material/circle:  TRANSFER OUT"
-                in_badge_title = ":material/my_location:  TARGET SIGNING" if is_target else ":material/circle:  TRANSFER IN"
+                out_badge_title = "[!] FORCED SALE" if is_forced else "[OUT] TRANSFER OUT"
+                in_badge_title = "[TARGET] TARGET SIGNING" if is_target else "[IN] TRANSFER IN"
                 in_badge_color = "#38bdf8" if is_target else "#4ade80"
                 in_bg_color = "rgba(56, 189, 248, 0.1)" if is_target else "rgba(34, 197, 94, 0.1)"
                 in_border_color = "rgba(56, 189, 248, 0.35)" if is_target else "rgba(34, 197, 94, 0.3)"
@@ -1767,7 +1768,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             st.markdown(
                 f"""
                 <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    <span style="font-size: 0.92rem; font-weight: 700; color: {banner_title_col};">:material/person:  Current Squad ({horizon_gws}-GW Run)</span>
+                    <span style="font-size: 0.92rem; font-weight: 700; color: {banner_title_col};">Current Squad ({horizon_gws}-GW Run)</span>
                     <span style="font-size: 0.80rem; font-weight: 600; color: {banner_sub_col}; margin-left: 6px;">({base_formation} · {base_pts:.1f} xP)</span>
                 </div>
                 """,
@@ -1820,7 +1821,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             st.markdown(
                 f"""
                 <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    <span style="font-size: 0.92rem; font-weight: 700; color: {banner_title_col};">{f":material/style:  Optimal Wildcard Squad ({horizon_gws}-GW Run)" if chip_mode == ":material/style:  Wildcard" else (f":material/bolt:  Optimal Free Hit Squad" if chip_mode == ":material/bolt:  Free Hit" else f":material/sync:  Transfer Squad ({horizon_gws}-GW Run)")}</span>
+                    <span style="font-size: 0.92rem; font-weight: 700; color: {banner_title_col};">{f"Optimal Wildcard Squad ({horizon_gws}-GW Run)" if chip_mode == "Wildcard" else (f"Optimal Free Hit Squad" if chip_mode == "Free Hit" else f"Transfer Squad ({horizon_gws}-GW Run)")}</span>
                     <span style="font-size: 0.80rem; font-weight: 600; color: {banner_sub_col}; margin-left: 6px;">({trans_formation} · {trans_pts:.1f} xP)</span>
                 </div>
                 """,
