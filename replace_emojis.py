@@ -98,7 +98,7 @@ replacements['??'] = ':material/trending_down:'
 replacements['?'] = ':material/add:'
 replacements['?'] = ':material/remove:'
 replacements['??'] = ':material/attach_money:'
-replacements['?'] = ':material/priority_high:'
+replacements['?'] = '?'
 
 for root, dirs, files in os.walk('tabs'):
     for file in files:

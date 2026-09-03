@@ -335,7 +335,7 @@ def evaluate_league_multi_gw(
     FROM fixtures f
     INNER JOIN teams th ON f.team_h = th.id
     INNER JOIN teams ta ON f.team_a = ta.id
-    WHERE f.event >= :material/priority_high: AND f.event <= :material/priority_high:
+    WHERE f.event >= ? AND f.event <= ?
     """
     fix_df = pd.read_sql(fix_query, _conn, params=[start_gw, end_gw])
     all_players_query = """
@@ -1319,7 +1319,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
     st.markdown("#### :material/settings:  Parameters & Horizon")
 
     if pick_ids:
-        placeholders = ",".join([":material/priority_high:"] * len(pick_ids))
+        placeholders = ",".join(["?"] * len(pick_ids))
         cur = conn.cursor()
         cur.execute(f"SELECT SUM(now_cost) FROM players WHERE id IN ({placeholders})", pick_ids)
         squad_sell = round((cur.fetchone()[0] or 1000) / 10.0, 1)
@@ -1443,7 +1443,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             help="Filters out fringe players and cameo risks from transfer suggestions",
         )
 
-    placeholders = ",".join([":material/priority_high:"] * len(pick_ids))
+    placeholders = ",".join(["?"] * len(pick_ids))
     squad_query = f"""
     SELECT p.id, p.code, p.photo, p.web_name AS Player, p.team AS team_id,
            t.short_name AS Team,
@@ -1553,7 +1553,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         # stub rows so all 15 positions are represented and the optimizer can flag them.
         _missing_pick_ids = set(pick_ids) - set(curr_squad_horizon["id"].tolist())
         if _missing_pick_ids:
-            _miss_ph = ",".join([":material/priority_high:"] * len(_missing_pick_ids))
+            _miss_ph = ",".join(["?"] * len(_missing_pick_ids))
             _missing_df = pd.read_sql(
                 f"""SELECT p.id, p.code, p.photo, p.web_name AS Player, p.team AS team_id,
                        t.short_name AS Team,

@@ -53,7 +53,7 @@ def render_fixture_ticker_tab(conn, current_gw):
     FROM fixtures f
     INNER JOIN teams th ON f.team_h = th.id
     INNER JOIN teams ta ON f.team_a = ta.id
-    WHERE f.event >= :material/priority_high: AND f.event < :material/priority_high: AND f.finished = 0
+    WHERE f.event >= ? AND f.event < ? AND f.finished = 0
     ORDER BY f.event ASC
     """
     fixtures_df = pd.read_sql(

@@ -126,7 +126,7 @@ def fetch_transfer_targets_base_data(_conn, current_gw: int, target_gw: int, ena
         FROM fixtures f
         INNER JOIN teams th ON f.team_h = th.id
         INNER JOIN teams ta ON f.team_a = ta.id
-        WHERE f.event >= :material/priority_high: AND f.event <= :material/priority_high:
+        WHERE f.event >= ? AND f.event <= ?
         """,
         _conn,
         params=[current_gw, current_gw + 4],

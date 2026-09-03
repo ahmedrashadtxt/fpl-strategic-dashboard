@@ -136,7 +136,7 @@ def render_simulator_tab(conn, events_df, current_gw):
     FROM fixtures f
     INNER JOIN teams th ON f.team_h = th.id
     INNER JOIN teams ta ON f.team_a = ta.id
-    WHERE f.event = :material/priority_high:
+    WHERE f.event = ?
     """
     fixtures_df = pd.read_sql_query(adv_fixtures_query, conn, params=[selected_gw])
     from data import get_teams_fdr_map, get_fixture_for_team, get_historical_player_baselines

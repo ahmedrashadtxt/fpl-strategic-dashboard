@@ -318,9 +318,9 @@ def quick_sync_live_prices(conn):
             cursor.executemany(
                 """
                 UPDATE players 
-                SET now_cost = :material/priority_high:, status = :material/priority_high:, news = :material/priority_high:, chance_of_playing_next_round = :material/priority_high:,
-                    total_points = :material/priority_high:, form = :material/priority_high:, points_per_game = :material/priority_high:
-                WHERE id = :material/priority_high:
+                SET now_cost = ?, status = ?, news = ?, chance_of_playing_next_round = ?,
+                    total_points = ?, form = ?, points_per_game = ?
+                WHERE id = ?
                 """,
                 [
                     (
@@ -491,7 +491,7 @@ def find_best_chip_gw(chip_type: str, squad_df: pd.DataFrame, conn, next_gw_id: 
         """
         SELECT event, team_h, team_a, team_h_difficulty, team_a_difficulty
         FROM fixtures
-        WHERE event >= :material/priority_high: AND event <= 19
+        WHERE event >= ? AND event <= 19
         """,
         conn,
         params=[next_gw_id],
@@ -629,7 +629,7 @@ def get_cached_league_eval_df(
         FROM fixtures f
         INNER JOIN teams th ON f.team_h = th.id
         INNER JOIN teams ta ON f.team_a = ta.id
-        WHERE f.event >= :material/priority_high: AND f.event <= :material/priority_high:
+        WHERE f.event >= ? AND f.event <= ?
         """,
         _conn,
         params=[current_gw, max(19, selected_eval_gw)],
@@ -1016,7 +1016,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             st.warning("No squad picks found for this manager.")
             return
 
-        placeholders = ",".join([":material/priority_high:"] * len(pick_ids))
+        placeholders = ",".join(["?"] * len(pick_ids))
         squad_query = f"""
         SELECT
             p.id, p.code, p.photo, p.web_name AS Player, p.team AS team_id,
@@ -1245,7 +1245,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
 
             if enable_comparison and comp_data:
                 comp_pick_ids = [p["element"] for p in comp_data["picks"]]
-                comp_placeholders = ",".join([":material/priority_high:"] * len(comp_pick_ids))
+                comp_placeholders = ",".join(["?"] * len(comp_pick_ids))
                 comp_df = pd.read_sql(
                     squad_query.replace(placeholders, comp_placeholders),
                     conn,
@@ -1358,7 +1358,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             FROM fixtures f
             INNER JOIN teams th ON f.team_h = th.id
             INNER JOIN teams ta ON f.team_a = ta.id
-            WHERE f.event >= :material/priority_high: AND f.event <= :material/priority_high:
+            WHERE f.event >= ? AND f.event <= ?
             """
             adv_fix_df = pd.read_sql(adv_fixtures_query, conn, params=[current_gw, max(19, selected_eval_gw)])
             hist_baselines_df = get_historical_player_baselines(conn)

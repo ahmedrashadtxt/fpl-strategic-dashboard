@@ -49,7 +49,7 @@ def compute_active_solver_squad(conn, manager_id: str, target_gw: int, current_g
         return None, "No squad picks found for this FPL ID."
 
     pick_ids = [p["element"] for p in picks_list]
-    placeholders = ",".join([":material/priority_high:"] * len(pick_ids))
+    placeholders = ",".join(["?"] * len(pick_ids))
 
     squad_query = f"""
     SELECT
@@ -77,7 +77,7 @@ def compute_active_solver_squad(conn, manager_id: str, target_gw: int, current_g
     FROM fixtures f
     INNER JOIN teams th ON f.team_h = th.id
     INNER JOIN teams ta ON f.team_a = ta.id
-    WHERE f.event >= :material/priority_high: AND f.event <= :material/priority_high:
+    WHERE f.event >= ? AND f.event <= ?
     """
     adv_fix_df = pd.read_sql(adv_fixtures_query, conn, params=[current_gw, max(19, target_gw)])
     hist_baselines_df = get_historical_player_baselines(conn)

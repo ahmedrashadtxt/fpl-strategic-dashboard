@@ -60,7 +60,7 @@ if GA_MEASUREMENT_ID:
         var gaScript = window.parent.document.createElement('script');
         gaScript.id = 'ga-script';
         gaScript.async = true;
-        gaScript.src = "https://www.googletagmanager.com/gtag/js:material/priority_high:id={GA_MEASUREMENT_ID}";
+        gaScript.src = "https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}";
         window.parent.document.head.appendChild(gaScript);
 
         var inlineScript = window.parent.document.createElement('script');
@@ -76,7 +76,7 @@ if GA_MEASUREMENT_ID:
       // Fallback for cross-origin iframes
       var gaScript = document.createElement('script');
       gaScript.async = true;
-      gaScript.src = "https://www.googletagmanager.com/gtag/js:material/priority_high:id={GA_MEASUREMENT_ID}";
+      gaScript.src = "https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}";
       document.head.appendChild(gaScript);
 
       var inlineScript = document.createElement('script');
