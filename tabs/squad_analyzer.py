@@ -1137,7 +1137,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 st.toast("Dashboard & odds synced!", icon="⚡")
                 st.rerun()
 
-        col_tgl1, col_tgl2, col_tgl3, col_tgl4 = st.columns([1.5, 1.8, 1.7, 2.8])
+        col_tgl1, col_tgl2, col_tgl3, col_tgl4 = st.columns([1.2, 1.3, 3.0, 2.5])
         with col_tgl1:
             pitch_view = st.toggle("🏟️ **Pitch View**", value=True, key="tab4_pitch_toggle")
         with col_tgl2:

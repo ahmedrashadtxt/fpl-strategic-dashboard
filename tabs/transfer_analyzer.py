@@ -641,7 +641,7 @@ def solve_chip_transfers_pulp(
     
     top_cand_list = []
     
-    limits = {"GKP": 15, "DEF": 40, "MID": 45, "FWD": 25}
+    limits = {"GKP": 8, "DEF": 20, "MID": 25, "FWD": 15}
     for pos, limit in limits.items():
         pos_df = raw_avail[raw_avail["Pos"] == pos]
         if pos_df.empty: continue
@@ -1821,6 +1821,13 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("💾 Save Transfer Plan for Simulator", key="save_transfer_sim_btn", type="primary", use_container_width=True):
+                st.session_state["transfer_result"] = {
+                    "transferred_squad_df": transferred_squad_df,
+                    "swaps": swaps,
+                    "curr_squad_horizon": curr_squad_horizon,
+                    "locked_players": locked_players,
+                    "targeted_in_players": targeted_in_players
+                }
                 st.toast("Transfer Plan Saved! Navigate to Match Simulator to run scenarios.", icon="✅")
                 
         st.markdown("### 📋 Multi-Gameweek Performance Ledger")
