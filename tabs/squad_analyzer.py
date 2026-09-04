@@ -327,7 +327,7 @@ def fetch_dream_team_data(target_gw: int):
         top_pts = sum(el.get("points", 0) for el in dt_elements)
         return {
             "type": "dream_team",
-            "manager_name": "Super Team",
+            "manager_name": "Team of the Week",
             "player_name": "Official Dream Team",
             "total_score": top_pts,
             "picks": picks_list,
@@ -339,6 +339,7 @@ def fetch_dream_team_data(target_gw: int):
 def fetch_motw_manager_data(target_gw: int):
     motw_id = None
     motw_score = None
+    fallback_used = False
     try:
         bs_res = requests.get(
             "https://fantasy.premierleague.com/api/bootstrap-static/", timeout=10
@@ -353,12 +354,24 @@ def fetch_motw_manager_data(target_gw: int):
     except Exception:
         pass
 
+    if not motw_id:
+        try:
+            league_res = requests.get("https://fantasy.premierleague.com/api/leagues-classic/314/standings/", timeout=10)
+            if league_res.status_code == 200:
+                results = league_res.json().get("standings", {}).get("results", [])
+                if results:
+                    motw_id = results[0].get("entry")
+                    motw_score = results[0].get("event_total")
+                    fallback_used = True
+        except Exception:
+            pass
+
     if motw_id:
         try:
             mgr_info = requests.get(
                 f"https://fantasy.premierleague.com/api/entry/{motw_id}/", timeout=10
             ).json()
-            mgr_name = mgr_info.get("name", "Top Manager")
+            mgr_name = mgr_info.get("name", "World #1 Manager" if fallback_used else "Top Manager")
             player_name = (
                 f"{mgr_info.get('player_first_name', '')}"
                 f" {mgr_info.get('player_last_name', '')}".strip()
@@ -368,14 +381,14 @@ def fetch_motw_manager_data(target_gw: int):
                 timeout=10,
             ).json()
             picks_list = picks_res.get("picks", [])
+            
+            final_score = motw_score or picks_res.get("entry_history", {}).get("points", 0)
+            
             return {
                 "type": "motw",
                 "manager_name": mgr_name,
                 "player_name": player_name,
-                "total_score": (
-                    motw_score
-                    or picks_res.get("entry_history", {}).get("points", 0)
-                ),
+                "total_score": final_score,
                 "picks": picks_list,
             }
         except Exception:
@@ -1327,7 +1340,8 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
 
             if super_team_mode:
                 comp_data = dream_team_data or motw_manager_data
-                comp_title = "Super Team"
+                raw_title = comp_data.get("manager_name", "Team of the Week") if comp_data else "Super Team"
+                comp_title = (raw_title[:20] + "..") if len(raw_title) > 22 else raw_title
             else:
                 comp_data = motw_manager_data or dream_team_data
                 raw_title = comp_data.get("manager_name", "Manager of the Week") if comp_data else "Top Performer"
