@@ -1017,20 +1017,31 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
         total_points = mgr_data.get("summary_overall_points", 0)
         overall_rank = mgr_data.get("summary_overall_rank", 0)
 
+        import time
+        now_epoch = int(time.time())
+
         finished_gw_ids = (
             [int(r["id"]) for _, r in events_df[events_df["finished"] == 1].iterrows()]
             if "finished" in events_df.columns
             else []
         )
-        next_gw_row = events_df[events_df["is_next"] == 1]
-        next_gw_id = int(next_gw_row["id"].values[0]) if not next_gw_row.empty else current_gw
 
-        ongoing_gw_ids = [
-            int(r["id"]) for _, r in events_df.iterrows()
-            if int(r["id"]) not in finished_gw_ids and int(r["id"]) < next_gw_id
-        ]
+        ongoing_gw_ids = []
+        for _, r in events_df.iterrows():
+            gw_id = int(r["id"])
+            if gw_id in finished_gw_ids:
+                continue
+            if r.get("is_current") == 1 or (not r.get("finished") and r.get("deadline_time_epoch", 2000000000) <= now_epoch):
+                ongoing_gw_ids.append(gw_id)
+
         ongoing_gw = ongoing_gw_ids[0] if ongoing_gw_ids else None
         last_finished_gw = max(finished_gw_ids) if finished_gw_ids else None
+
+        upcoming_gws = [
+            int(r["id"]) for _, r in events_df.iterrows()
+            if int(r["id"]) not in finished_gw_ids and int(r["id"]) not in ongoing_gw_ids
+        ]
+        next_gw_id = upcoming_gws[0] if upcoming_gws else current_gw
 
         picks_data = fetch_manager_picks(mgr_to_use, ongoing_gw or next_gw_id, next_gw_id)
         entry_history = picks_data.get("entry_history", {})
@@ -1190,7 +1201,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 st.rerun()
 
         
-        col_tgl1, col_tgl2, col_tgl3, col_tgl4, col_pad = st.columns([1.3, 1.4, 1.4, 3.0, 3.5], vertical_alignment="center")
+        col_tgl1, col_tgl2, col_tgl3, col_tgl4, col_pad = st.columns([1.2, 1.3, 1.3, 1.5, 4.7], vertical_alignment="center")
         with col_tgl1:
             pitch_view = st.toggle(":material/stadium: **Pitch View**", value=True, key="tab4_pitch_toggle")
         with col_tgl2:
@@ -1203,49 +1214,52 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 
         with col_tgl4:
             enable_betting = st.toggle(":material/bar_chart:  **Betting Market xG**", value=True, key="tab4_enable_betting")
-            market_weight = 0.35
-            factor_movement = True
-            if enable_betting:
-                col_m1, col_m2 = st.columns([1.6, 1.0])
-                with col_m1:
-                    market_weight = st.slider(
-                        "Market Weight",
-                        min_value=0.0,
-                        max_value=1.0,
-                        value=0.35,
-                        step=0.05,
-                        format="%.2f",
-                        key="tab4_mkt_weight",
-                        help="0.0 = 100% Model | 1.0 = 100% Betting Odds",
-                    )
-                with col_m2:
-                    factor_movement = st.checkbox(":material/bolt:  Line Movement", value=True, key="tab4_factor_movement")
+            
+        market_weight = 0.35
+        factor_movement = True
+        
+        if enable_betting:
+            st.markdown("<div style='margin-top: -5px; margin-bottom: 10px;'></div>", unsafe_allow_html=True)
+            col_m1, col_m2, col_pad2 = st.columns([2.0, 1.5, 6.5], vertical_alignment="center")
+            with col_m1:
+                market_weight = st.slider(
+                    "Market Weight",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.35,
+                    step=0.05,
+                    format="%.2f",
+                    key="tab4_mkt_weight",
+                    help="0.0 = 100% Model | 1.0 = 100% Betting Odds",
+                )
+            with col_m2:
+                factor_movement = st.checkbox(":material/bolt:  Line Movement", value=True, key="tab4_factor_movement")
 
         # BELOW the row: Lock Lineup
         existing_snap = get_snapshot(conn, next_gw_id) if selected_eval_gw == next_gw_id else None
         snap_locked = existing_snap is not None
         
         if selected_eval_gw == next_gw_id:
-            st.markdown("<div style='margin-top: 10px; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
-            col_lock_btn, col_lock_info = st.columns([2.0, 8.0], vertical_alignment="center")
+            st.markdown("<div style='margin-top: 15px; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
+            col_lock_btn, col_lock_info = st.columns([1.5, 8.5], vertical_alignment="center")
             
             with col_lock_btn:
-                btn_label = ":material/lock:  Re-Lock Lineup" if snap_locked else ":material/lock:  Lock In Starting XI"
-                if st.button(btn_label, key=f"commit_gw_{selected_eval_gw}", use_container_width=True):
-                    full_lineup_df = pd.concat([optimal_xi, optimal_bench], ignore_index=True)
-                    lineup_records = full_lineup_df.to_dict(orient="records")
-                    
-                    save_pre_gw_snapshot(
-                        conn=conn,
-                        gw=selected_eval_gw,
-                        lineup_data=lineup_records,
-                        chip=active_chip if active_chip != "None" else None,
-                        formation=optimal_formation,
-                        market_weight=market_weight if enable_betting else 0.0,
-                        factor_movement=factor_movement if enable_betting else False,
+                if snap_locked:
+                    lock_btn = st.button("Re-Lock Lineup", key="tab4_relock_btn")
+                else:
+                    lock_btn = st.button("Lock Lineup Snapshot", type="primary", key="tab4_lock_btn")
+            
+            with col_lock_info:
+                if snap_locked:
+                    st.markdown(
+                        f"<div style='font-size: 0.85rem; color: #22c55e; font-weight: 600;'>Locked at {existing_snap['timestamp']}</div>",
+                        unsafe_allow_html=True
                     )
-                    st.toast(f"GW{selected_eval_gw} optimal lineup committed to Audit Journal!", icon=":material/check_circle: ")
-                    st.rerun()
+                
+            if lock_btn:
+                save_snapshot(conn, next_gw_id, user_proj_xi_pts, optimal_formation, user_starters, user_bench)
+                st.toast(f"Snapshot locked for GW{next_gw_id}!", icon=":material/lock:")
+                st.rerun()
                     
             with col_lock_info:
                 if snap_locked:
