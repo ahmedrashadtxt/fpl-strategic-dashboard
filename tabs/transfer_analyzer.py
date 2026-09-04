@@ -5,6 +5,7 @@ import os
 from collections import Counter
 
 import pandas as pd
+import pulp
 import requests
 import streamlit as st
 
@@ -30,9 +31,9 @@ from theme import (
 SILHOUETTE_BASE64 = (
     "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmci"
     "IHZpZXdCb3g9IjAgMCA0NCA0NCIgZmlsbD0ibm9uZSI+PHJlY3Qgd2lkdGg9IjQ0IiBoZWlnaHQ9"
-    "IjQ0IiByeD0iMjIiIGZpbGw9IiMxZTI5M2IiLz48Y2lyY2xlIGN4PSIyMiIgY3k9IjE2IiByPSI3"
-    "LjUiIGZpbGw9IiM2NDc0OGIiLz48cGF0aCBkPSJNOSAzOWMwLTcuMTggNS44Mi0xMyAxMy0xM3Mx"
-    "MyA1LjgyIDEzIDEzIiBmaWxsPSIjNjQ3NDhiIi8+PC9zdmc+"
+    "IjQ0IiByeD0iMjIiIGZpbGw9IjExZTI5M2IiLz48Y2lyY2xlIGN4PSIyMiIgY3k9IjE2IiByPSI3"
+    "LjUiIGZpbGw9IjY0NzQ4YiIvPjxwYXRoIGQ9Ik05IDM5YzAtNy4xOCA1LjgyLTEzIDEzLTEzczEz"
+    "IDUuODIgMTMgMTMiIGZpbGw9IjY0NzQ4YiIvPjwvc3ZnPg=="
 )
 
 
@@ -280,6 +281,17 @@ def fetch_transfer_manager_history(manager_id: str):
         return {}
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_transfer_manager_transfers(manager_id: str):
+    try:
+        url = f"https://fantasy.premierleague.com/api/entry/{manager_id}/transfers/"
+        res = requests.get(url, timeout=10)
+        if res.status_code == 200:
+            return res.json()
+    except Exception:
+        pass
+    return []
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_transfer_manager_picks(manager_id: str, next_gw: int):
     try:
@@ -355,9 +367,6 @@ def evaluate_league_multi_gw(
     rolling_metrics = get_rolling_player_metrics(_conn)
     market_cache = load_db_market_odds(_conn) if enable_betting else {}
 
-    # DGW-safe fixture map: (team_id, gw)  list[fixture_dict].
-    # Using setdefault+append ensures double gameweeks accumulate both fixtures
-    # instead of silently overwriting the first with the second.
     fixture_map: dict[tuple, list] = {}
     for _, row in fix_df.iterrows():
         gw = row["GW"]
@@ -376,11 +385,9 @@ def evaluate_league_multi_gw(
     results = []
     past_gws = max(1, start_gw - 1)
 
-    # Precompute rolling minutes as a dictionary lookup
     roll_mins_dict = {}
     if rolling_metrics is not None and not rolling_metrics.empty:
         roll_mins_dict = rolling_metrics["roll_mins"].to_dict()
-
 
     for _, p in players_df.iterrows():
         pid = p["id"]
@@ -388,10 +395,6 @@ def evaluate_league_multi_gw(
         p_mins = float(p.get("minutes", 0) or 0)
         avg_mins = roll_m if roll_m > 0 else (p_mins / past_gws)
 
-        # Hard-zero unavailable players: departed (status='u'), released (can_select=0),
-        # or fully ruled out (chance_of_playing_next_round == 0).
-        # They stay in results so curr_squad_horizon always has all 15 picks, allowing
-        # the optimizer to flag them for removal. They must NOT appear in available_market_df.
         is_unavailable = (
             p.get("can_select") == 0
             or str(p.get("Status", "")).lower() == "u"
@@ -422,7 +425,7 @@ def evaluate_league_multi_gw(
         else:
             mins_weight = 1.0 if p["Cost"] >= 7.0 else 0.85
 
-        if mins_weight <= 0.12 and p["Status"] != 'a':
+        if mins_weight <= 0.12 and p["Status"] != "a":
             p_dict = dict(p)
             p_dict["avg_mins"] = round(avg_mins, 0)
             p_dict["Horizon_xP"] = 0.0
@@ -431,7 +434,7 @@ def evaluate_league_multi_gw(
             for gw in range(start_gw, end_gw + 1):
                 p_dict[f"GW{gw}"] = 0.0
             results.append(p_dict)
-            continue  # skip heavy evaluation for inactive players
+            continue
 
         total_horizon_xp = 0.0
         total_target_horizon_xp = 0.0
@@ -454,7 +457,7 @@ def evaluate_league_multi_gw(
                 for f_data in team_fixtures:
                     base_xp = calculate_projected_points(p, f_data, start_gw, hist_baselines)
                     target_base_xp = calculate_projected_points(p_target, f_data, start_gw, hist_baselines)
-                    
+
                     if enable_betting:
                         opp_short = f_data["opponent"].replace(" (H)", "").replace(" (A)", "")
                         final_xp, _, _ = apply_market_projection_with_movement(
@@ -468,7 +471,7 @@ def evaluate_league_multi_gw(
                     else:
                         final_xp = base_xp
                         target_final_xp = target_base_xp
-                        
+
                     gw_scaled_xp += final_xp
                     target_gw_scaled_xp += target_final_xp
 
@@ -492,7 +495,7 @@ def evaluate_league_multi_gw(
 
 
 def _fast_xi_xp(all_players: list[dict]) -> float:
-    """Greedy O(n log n) starting-XI xP estimator — no ILP overhead."""
+    """Greedy O(n log n) starting-XI xP estimator with endogenous captaincy doubling."""
     gkps = sorted([p for p in all_players if p.get("Pos") == "GKP"], key=lambda x: -x.get("Horizon_xP", 0))
     defs = sorted([p for p in all_players if p.get("Pos") == "DEF"], key=lambda x: -x.get("Horizon_xP", 0))
     mids = sorted([p for p in all_players if p.get("Pos") == "MID"], key=lambda x: -x.get("Horizon_xP", 0))
@@ -500,16 +503,14 @@ def _fast_xi_xp(all_players: list[dict]) -> float:
     mandatory = gkps[:1] + defs[:3] + mids[:2] + fwds[:1]
     rem_pool = sorted(defs[3:] + mids[2:] + fwds[1:], key=lambda x: -x.get("Horizon_xP", 0))
     starters = mandatory + rem_pool[:4]
-    return sum(p.get("Horizon_xP", 0) for p in starters)
+    
+    starting_xp = sum(p.get("Horizon_xP", 0) for p in starters)
+    top_starter_xp = max((p.get("Horizon_xP", 0) for p in starters), default=0.0)
+    return starting_xp + top_starter_xp
 
 
 def _fast_xi_player_set(all_players: list[dict]) -> set:
-    """Returns the set of player IDs in the optimal starting XI.
-
-    Mirrors `_fast_xi_xp` greedy selection exactly, but returns a set of IDs
-    instead of summed xP. Used to scope `reinvested_starting_cost` to the 11
-    starters only, so the bonus score doesn't reward bench investment.
-    """
+    """Returns the set of player IDs in the optimal starting XI."""
     gkps = sorted([p for p in all_players if p.get("Pos") == "GKP"], key=lambda x: -x.get("Horizon_xP", 0))
     defs = sorted([p for p in all_players if p.get("Pos") == "DEF"], key=lambda x: -x.get("Horizon_xP", 0))
     mids = sorted([p for p in all_players if p.get("Pos") == "MID"], key=lambda x: -x.get("Horizon_xP", 0))
@@ -520,8 +521,6 @@ def _fast_xi_player_set(all_players: list[dict]) -> set:
     return {p["id"] for p in starters}
 
 
-
-
 def _maximize_leftover_budget(
     in_players_flat: list[dict],
     remaining_squad: pd.DataFrame,
@@ -530,15 +529,6 @@ def _maximize_leftover_budget(
     target_in_set: set,
     combo_budget: int = 80000,
 ) -> tuple[list[dict], float]:
-    """Greedy per-slot budget optimiser — O(n×k) instead of O(n^k).
-
-    For each free (non-target) slot in the proposed transfer-in set, independently
-    picks the highest-xP affordable candidate that satisfies team limits, committing
-    cost and team-counts slot by slot. This eliminates the itertools.product
-    combinatorial explosion while producing near-optimal results in practice
-    (slots are typically 12, making the greedy choice essentially exact).
-    """
-    # Pre-sort candidates per position by xP descending for fast scanning
     pos_cand_map: dict[str, pd.DataFrame] = {}
     for pos in avail_cands["Pos"].unique():
         pos_cand_map[pos] = avail_cands[avail_cands["Pos"] == pos].sort_values(
@@ -554,7 +544,7 @@ def _maximize_leftover_budget(
         return working_in, leftover
 
     locked_idx = [i for i in range(len(working_in)) if i not in free_slots]
-    
+
     base_team_counts = remaining_squad["team_id"].value_counts().to_dict()
     for i in locked_idx:
         tid = working_in[i]["team_id"]
@@ -570,19 +560,19 @@ def _maximize_leftover_budget(
     for slot_i in free_slots:
         cur_p = working_in[slot_i]
         pos = cur_p["Pos"]
-        
+
         current_total = sum(p["Cost"] for p in working_in)
         headroom = budget_available - current_total
         max_candidate_cost = cur_p["Cost"] + headroom
         cur_xp = cur_p["Horizon_xP"]
         best_cand = None
-        best_xp = cur_xp  # only upgrade if we beat current player
+        best_xp = cur_xp
 
         cands = pos_cand_map.get(pos, pd.DataFrame())
         for _, cand in cands.iterrows():
             c_xp = cand["Horizon_xP"]
             if c_xp <= best_xp:
-                break  # sorted desc — nothing better remains
+                break
             if cand["id"] in committed_ids:
                 continue
             if cand["Cost"] > max_candidate_cost + 1e-5:
@@ -592,7 +582,7 @@ def _maximize_leftover_budget(
                 continue
             best_cand = cand
             best_xp = c_xp
-            break  # first valid candidate is best (sorted by xP desc)
+            break
 
         if best_cand is not None:
             working_in[slot_i] = best_cand.to_dict()
@@ -604,7 +594,6 @@ def _maximize_leftover_budget(
             tid = cur_p["team_id"]
             committed_team_counts[tid] = committed_team_counts.get(tid, 0) + 1
 
-    # Budget safety assertion: if violated, revert to the original proposed list
     total_in_cost = sum(p["Cost"] for p in working_in)
     if total_in_cost > budget_available + 1e-5:
         working_in = initial_in_players
@@ -612,8 +601,6 @@ def _maximize_leftover_budget(
     leftover = round(budget_available - sum(p["Cost"] for p in working_in), 2)
     return working_in, leftover
 
-
-import pulp
 
 def solve_chip_transfers_pulp(
     current_squad_df,
@@ -625,47 +612,46 @@ def solve_chip_transfers_pulp(
     blocked_in_player_ids: list = None,
     is_free_hit: bool = False,
 ):
-    import pulp
-    import pandas as pd
     locked_set = set(locked_player_ids or [])
     blocked_in_set = set(blocked_in_player_ids or [])
     target_in_set = set(target_in_player_ids or []) - blocked_in_set
-    
+
     prob = pulp.LpProblem("FPL_Chip_Solver", pulp.LpMaximize)
-    
+
     raw_avail = candidate_league_df[
         (~candidate_league_df["id"].isin(blocked_in_set)) &
-        (candidate_league_df["Status"].isin(['a', 'd'])) &
+        (candidate_league_df["Status"].isin(["a", "d"])) &
         (candidate_league_df["Chance"] != 0) &
-        (candidate_league_df["Chance"] != '0')
+        (candidate_league_df["Chance"] != "0")
     ].copy()
-    
+
     top_cand_list = []
     limits = {"GKP": 8, "DEF": 22, "MID": 25, "FWD": 16}
     for pos, limit in limits.items():
         pos_df = raw_avail[raw_avail["Pos"] == pos]
-        if pos_df.empty: continue
+        if pos_df.empty:
+            continue
         top_xp = pos_df.sort_values(by="Horizon_xP", ascending=False).head(limit)
         cheapest = pos_df.sort_values(by="Cost", ascending=True).head(4)
         top_cand_list.extend([top_xp, cheapest])
-        
+
     current_in_raw = candidate_league_df[candidate_league_df["id"].isin(current_squad_df["id"].tolist())]
     top_cand_list.append(current_in_raw)
-    
+
     if target_in_set:
         top_cand_list.append(candidate_league_df[candidate_league_df["id"].isin(target_in_set)])
     if locked_set:
         top_cand_list.append(candidate_league_df[candidate_league_df["id"].isin(locked_set)])
-        
+
     avail = pd.concat(top_cand_list, ignore_index=True).drop_duplicates(subset=["id"])
-    
+
     player_vars = {}
     starter_vars = {}
     cap_vars = {}
-    
+
     cost_dict = avail.set_index("id")["Cost"].to_dict()
     xp_dict = avail.set_index("id")["Horizon_xP"].to_dict()
-    
+
     for pid in avail["id"]:
         x = pulp.LpVariable(f"squad_{pid}", cat="Binary")
         y = pulp.LpVariable(f"start_{pid}", cat="Binary")
@@ -673,21 +659,21 @@ def solve_chip_transfers_pulp(
         player_vars[pid] = x
         starter_vars[pid] = y
         cap_vars[pid] = c
-        
+
         prob += y <= x
         prob += c <= y
         if pid in locked_set or pid in target_in_set:
             prob += x == 1
         if pid in (force_out_player_ids or []) and pid not in locked_set:
             prob += x == 0
-            
+
     prob += pulp.lpSum(starter_vars[pid] for pid in avail[avail["Pos"] == "GKP"]["id"]) == 1
     prob += pulp.lpSum(starter_vars[pid] for pid in avail[avail["Pos"] == "DEF"]["id"]) >= 3
     prob += pulp.lpSum(starter_vars[pid] for pid in avail[avail["Pos"] == "FWD"]["id"]) >= 1
     prob += pulp.lpSum(starter_vars.values()) == 11
-    
+
     prob += pulp.lpSum(cap_vars.values()) == 1
-    
+
     prob += pulp.lpSum(
         starter_vars[pid] * xp_dict[pid] +
         cap_vars[pid] * xp_dict[pid] +
@@ -700,30 +686,27 @@ def solve_chip_transfers_pulp(
     prob += pulp.lpSum(player_vars[pid] for pid in avail[avail["Pos"] == "MID"]["id"]) == 5
     prob += pulp.lpSum(player_vars[pid] for pid in avail[avail["Pos"] == "FWD"]["id"]) == 3
     prob += pulp.lpSum(player_vars.values()) == 15
-    
+
     for team_id in avail["team_id"].unique():
         team_pids = avail[avail["team_id"] == team_id]["id"].tolist()
         prob += pulp.lpSum(player_vars[pid] for pid in team_pids) <= 3
-        
+
     prob += pulp.lpSum(player_vars[pid] * cost_dict[pid] for pid in player_vars) <= team_value
-    
+
     prob.solve(pulp.PULP_CBC_CMD(timeLimit=6, gapRel=0.01, msg=False))
-    
-    if pulp.LpStatus[prob.status] != 'Optimal':
+
+    if pulp.LpStatus[prob.status] != "Optimal":
         return current_squad_df.copy(), []
-        
+
     selected_pids = [pid for pid in player_vars if pulp.value(player_vars[pid]) > 0.5]
     final_squad = avail[avail["id"].isin(selected_pids)].copy()
-    
+
     final_squad["is_transfer_in"] = ~final_squad["id"].isin(current_squad_df["id"].tolist())
     final_squad["is_target_in"] = final_squad["id"].isin(target_in_set)
-    
     final_squad["is_cap"] = final_squad["id"].apply(lambda pid: pulp.value(cap_vars.get(pid)) > 0.5 if pid in cap_vars else False)
-    final_squad["is_vc"] = False # Simple approximation, we can ignore VC for the solver display
-    
-    paired_transfers = []
-    # (Chip solver doesn't really pair transfers, it's a completely new squad)
-    return final_squad, paired_transfers
+    final_squad["is_vc"] = False
+
+    return final_squad, []
 
 
 def solve_multi_gw_transfers(
@@ -787,13 +770,14 @@ def solve_multi_gw_transfers(
     top_candidates = pd.concat(top_cand_list, ignore_index=True).drop_duplicates(subset=["id"])
 
     base_xi, _, _ = solve_optimal_xi(curr_squad)
-    base_xp = base_xi["Proj_Pts"].sum()
+    base_top_cap = base_xi["Proj_Pts"].max() if not base_xi.empty else 0.0
+    base_xp = (base_xi["Proj_Pts"].sum() if not base_xi.empty else 0.0) + base_top_cap
 
     eligible_out_ids = [pid for pid in curr_squad["id"].tolist() if pid not in locked_set]
     forced_out_list = [pid for pid in force_out_set if pid in eligible_out_ids]
-    
+
     min_k = max(1, min(len(forced_out_list), num_transfers))
-    
+
     best_overall_plan = None
     best_eval_score = -999.0
     best_starting_gain = 0.0
@@ -829,7 +813,6 @@ def solve_multi_gw_transfers(
                 pos_cand_lists.append(list(itertools.combinations(combined_pos.to_dict("records"), count)))
 
             candidate_in_combos = []
-            # Pre-convert remaining_squad to dicts once per out_combo for _fast_xi_xp
             remaining_records = remaining_squad.to_dict("records")
 
             for in_prod in itertools.product(*pos_cand_lists):
@@ -855,7 +838,7 @@ def solve_multi_gw_transfers(
 
                 quick_xp = sum(p["Horizon_xP"] for p in in_players_flat) - out_players["Horizon_xP"].sum()
                 target_bonus = sum(25.0 for pid in in_ids if pid in target_in_set)
-                heuristic_score = quick_xp + (0.35 * in_cost_total) + target_bonus
+                heuristic_score = quick_xp + target_bonus
                 candidate_in_combos.append((heuristic_score, in_players_flat, out_players))
 
             if not candidate_in_combos:
@@ -864,34 +847,30 @@ def solve_multi_gw_transfers(
             candidate_in_combos.sort(key=lambda x: x[0], reverse=True)
             top_to_eval = candidate_in_combos[:80]
 
-            # ── Fast scoring: use dict-based _fast_xi_xp instead of solve_optimal_xi ──
-            # This avoids 80 DataFrame constructions + 80 sort passes; only the final
-            # winner gets a proper solve_optimal_xi call below.
             for heuristic_score, in_players_flat, out_p_df in top_to_eval:
-                # Approximate starting xP via dict-based greedy (mirrors solve_optimal_xi logic)
+                _starter_ids = _fast_xi_player_set(remaining_records + in_players_flat)
                 new_starting_xp = _fast_xi_xp(remaining_records + in_players_flat)
-                # Bench xP approximation: total squad xP minus starting xP
+
+                raw_starter_xp = sum(
+                    p.get("Horizon_xP", 0) for p in (remaining_records + in_players_flat) if p["id"] in _starter_ids
+                )
                 total_squad_xp = (
                     sum(p.get("Horizon_xP", 0) for p in remaining_records)
                     + sum(p.get("Horizon_xP", 0) for p in in_players_flat)
                 )
-                new_bench_xp = max(0.0, total_squad_xp - new_starting_xp)
+                new_bench_xp = max(0.0, total_squad_xp - raw_starter_xp)
 
                 starting_gain = new_starting_xp - base_xp
                 target_matches = sum(1 for p in in_players_flat if p["id"] in target_in_set)
-
-                # Bonus score rewards investment on the pitch, not the bench.
-                # Use _fast_xi_player_set to identify which incoming players start.
-                _starter_ids = _fast_xi_player_set(remaining_records + in_players_flat)
-                reinvested_starting_cost = sum(
-                    p.get("Cost", 0) for p in in_players_flat if p["id"] in _starter_ids
-                )
+                
+                # 1.0 xP transfer friction per transaction to reflect the option value of an FT
+                transfer_friction = 1.0 * len(in_players_flat)
 
                 eval_score = (
                     (new_starting_xp * 1.0)
                     + (0.10 * new_bench_xp)
-                    + (0.05 * reinvested_starting_cost)
                     + (target_matches * 15.0)
+                    - transfer_friction
                 )
 
                 if best_overall_plan is None or eval_score > best_eval_score:
@@ -900,7 +879,6 @@ def solve_multi_gw_transfers(
                     best_overall_plan = {
                         "out_players": out_p_df,
                         "in_players": in_players_flat,
-                        # Defer DataFrame construction until we know the winner
                         "remaining_squad": remaining_squad,
                         "budget_available": budget_available,
                         "starting_gain": starting_gain,
@@ -920,14 +898,15 @@ def solve_multi_gw_transfers(
         avail_cands,
         target_in_set,
     )
-    
+
     refined_squad = pd.concat(
         [best_overall_plan["remaining_squad"], pd.DataFrame(refined_in_players)],
         ignore_index=True
     )
     refined_xi, refined_bench, _ = solve_optimal_xi(refined_squad)
+    refined_cap = refined_xi["Proj_Pts"].max() if not refined_xi.empty else 0.0
     best_overall_plan["in_players"] = refined_in_players
-    best_overall_plan["starting_gain"] = refined_xi["Proj_Pts"].sum() - base_xp
+    best_overall_plan["starting_gain"] = (refined_xi["Proj_Pts"].sum() + refined_cap) - base_xp
     best_overall_plan["target_matches"] = sum(
         1 for p in refined_in_players if p["id"] in target_in_set
     )
@@ -1283,8 +1262,37 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
     picks_data = fetch_transfer_manager_picks(mgr_to_use, next_gw)
     entry_hist = picks_data.get("entry_history", {})
-    bank_balance = entry_hist.get("bank", mgr_data.get("last_deadline_bank", 0)) / 10.0
-    pick_ids = [p["element"] for p in picks_data.get("picks", [])]
+    
+    # Calculate bank before applying transfers. But wait, if they made transfers, the bank balance is updated!
+    # Wait, the bank balance returned by /event/{gw}/picks/ is the bank AT THAT GAMEWEEK's DEADLINE.
+    # We should get the live bank balance. Where is it?
+    # last_deadline_bank is the bank balance right now!
+    # But wait, last_deadline_value and last_deadline_bank in entry are from the last deadline.
+    # What if they made a transfer? Their bank changes!
+    # Let's adjust bank balance using the transfer costs.
+    base_bank = entry_hist.get("bank", mgr_data.get("last_deadline_bank", 0))
+    
+    picks_list = picks_data.get("picks", [])
+    pick_ids = [p["element"] for p in picks_list]
+    pending_transfers = fetch_transfer_manager_transfers(mgr_to_use)
+    if pending_transfers:
+        for t in reversed(pending_transfers):
+            if t.get("event") == next_gw:
+                out_id = t.get("element_out")
+                in_id = t.get("element_in")
+                out_cost = t.get("element_out_cost")
+                in_cost = t.get("element_in_cost")
+                if out_id in pick_ids:
+                    idx = pick_ids.index(out_id)
+                    pick_ids[idx] = in_id
+                    # Adjust bank
+                    base_bank = base_bank + out_cost - in_cost
+                    for p in picks_list:
+                        if p["element"] == out_id:
+                            p["element"] = in_id
+                            break
+                            
+    bank_balance = base_bank / 10.0
     if not pick_ids:
         st.warning("No squad picks retrieved for this manager.")
         return
@@ -1304,93 +1312,54 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
     itb_val = entry_hist.get("bank", mgr_data.get("last_deadline_bank", 0)) / 10.0
     team_val = round(squad_sell + itb_val, 1)
 
-    chip_mode = st.radio("Strategy Mode:", ["Regular Transfers", ":material/style:  Wildcard", ":material/bolt:  Free Hit"], horizontal=True, index=0)
-
-
-    
+    chip_mode = st.radio(
+        "Strategy Mode:",
+        ["Regular Transfers", ":material/style:  Wildcard", ":material/bolt:  Free Hit"],
+        horizontal=True,
+        index=0,
+    )
 
     if chip_mode == "Regular Transfers":
-
         c1, c2, c3, c4 = st.columns([1.6, 1.0, 1.0, 1.4], vertical_alignment="bottom")
-
         with c1:
-
             horizon_gws = st.selectbox(
-
                 "Evaluation Horizon",
-
                 options=[1, 2, 3, 5],
-
-                format_func=lambda x: f"Next {x} Gameweek{'s' if x > 1 else ''} (GW{next_gw}GW{next_gw + x - 1})",
-
+                format_func=lambda x: f"Next {x} Gameweek{'s' if x > 1 else ''} (GW{next_gw}–GW{next_gw + x - 1})",
                 index=2,
-
             )
-
         with c2:
-
             ft_selected = st.number_input("Free Transfers", min_value=1, max_value=5, value=calc_ft, step=1)
-
         with c3:
-
             max_hits = st.number_input("Max Hits (-4)", min_value=0, max_value=5, value=0, step=1)
-
         with c4:
-
             total_allowed_transfers = int(ft_selected + max_hits)
-
             hit_cost_str = f"(-{max_hits * 4} pts)" if max_hits > 0 else "(0 pts)"
-
             st.metric("Planned Moves", f"{total_allowed_transfers} Transfers", delta=hit_cost_str if max_hits > 0 else None, delta_color="inverse")
 
     elif chip_mode == ":material/style:  Wildcard":
-
         horizon_gws = st.selectbox(
-
             "Evaluation Horizon",
-
             options=[3, 5, 8],
-
-            format_func=lambda x: f"Next {x} Gameweeks (GW{next_gw}GW{next_gw + x - 1})",
-
+            format_func=lambda x: f"Next {x} Gameweeks (GW{next_gw}–GW{next_gw + x - 1})",
             index=1,
-
         )
-
         ft_selected = 15
-
         max_hits = 0
-
         total_allowed_transfers = 15
-
         st.info(":material/style:  **Wildcard Active**: Optimizing a permanent 15-man squad over the selected horizon with 0 point deductions.")
-
-
         st.metric("Available Budget", f"£{team_val:.1f}m", help=f"Squad Sell Value: £{squad_sell:.1f}m | ITB: £{itb_val:.1f}m")
-
-
         st.caption(f"Squad Sell Value: £{squad_sell:.1f}m | In The Bank: £{itb_val:.1f}m")
 
     else:
-
         horizon_gws = 1
-
         st.markdown("**Evaluation Horizon:** Next 1 Gameweek (Locked for Free Hit)")
-
         ft_selected = 15
-
         max_hits = 0
-
         total_allowed_transfers = 15
-
         st.info(":material/bolt:  **Free Hit Active**: Optimizing a single-gameweek £100m+ roster with 0 point deductions. Reverts automatically next gameweek.")
-
-
         st.metric("Available Budget", f"£{team_val:.1f}m", help=f"Squad Sell Value: £{squad_sell:.1f}m | ITB: £{itb_val:.1f}m")
-
-
         st.caption(f"Squad Sell Value: £{squad_sell:.1f}m | In The Bank: £{itb_val:.1f}m")
-
 
     # ── View & Model Controls ─────────────────────────────────────────────────
     col_tgl1, col_tgl2, col_tgl3, col_tgl4 = st.columns([1.3, 1.6, 1.4, 1.7], vertical_alignment="center")
@@ -1442,20 +1411,14 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         factor_movement=True,
     )
 
-    # Broad eligibility mask for the UI dropdown pool: allows ANY active player
-    # so that returning stars with status='i' or 'd' always appear in the search box.
-    _is_ui_available = (league_eval_df["can_select"] == 1) & (league_eval_df["Status"] != 'u')
+    _is_ui_available = (league_eval_df["can_select"] == 1) & (league_eval_df["Status"] != "u")
     _not_in_squad = ~league_eval_df["id"].isin(pick_ids)
 
-    # UI dropdown pool: NO avg_mins gate.
     available_market_df = league_eval_df[
         _not_in_squad & _is_ui_available
     ].sort_values(by="Horizon_xP", ascending=False)
 
-    # Solver candidate pool: We just pass available_market_df.
-    # The solver internally uses min_avg_minutes to filter non-targets.
     solver_candidate_df = available_market_df.copy()
-
 
     # ── Option Dictionaries for Consolidated Boxes ────────────────────────────
     pos_options = []
@@ -1481,6 +1444,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         key = f"block_{r['id']}"
         neg_options.append(key)
         neg_labels[key] = f":material/block:  Blacklist: {r['Player']} ({r['Team']} · {r['Pos']} · £{r['Cost']:.1f}m)"
+
     col_pos, col_neg = st.columns(2)
     with col_pos:
         selected_positive = st.multiselect(
@@ -1499,7 +1463,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             options=neg_options,
             format_func=lambda k: neg_labels.get(k, k),
             default=[],
-            help="Select squad players you must sell and market players you refuse to buy."
+            help="Select squad players you must sell and market players you refuse to buy.",
         )
         force_out_players = [int(k.replace("sell_", "")) for k in selected_negative if k.startswith("sell_")]
         blocked_in_players = [int(k.replace("block_", "")) for k in selected_negative if k.startswith("block_")]
@@ -1509,7 +1473,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                 f":material/warning:  You targeted {len(targeted_in_players)} players, but only have {total_allowed_transfers} transfer(s) planned. Targets will be prioritized up to your limit."
             )
 
-        submit_solve = st.button(":material/rocket:  Solve Transfers", width='stretch', type="primary")
+        submit_solve = st.button(":material/rocket:  Solve Transfers", width="stretch", type="primary")
 
     state_key = f"transfer_solve_{mgr_to_use}_{chip_mode}_{horizon_gws}_{ft_selected}_{max_hits}_{market_weight}"
     results_slot = st.empty()
@@ -1524,9 +1488,6 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
         curr_squad_horizon = league_eval_df[league_eval_df["id"].isin(pick_ids)].copy()
 
-        # Squad guarantee: if any pick is absent from league_eval_df (player departed the
-        # league, status='u' with no DB row, etc.), fetch them directly and add zero-xP
-        # stub rows so all 15 positions are represented and the optimizer can flag them.
         _missing_pick_ids = set(pick_ids) - set(curr_squad_horizon["id"].tolist())
         if _missing_pick_ids:
             _miss_ph = ",".join(["?"] * len(_missing_pick_ids))
@@ -1551,71 +1512,27 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             curr_squad_horizon = pd.concat([curr_squad_horizon, _missing_df], ignore_index=True)
 
         if chip_mode in [":material/style:  Wildcard", ":material/bolt:  Free Hit"]:
-
-
             transferred_squad_df, swaps = solve_chip_transfers_pulp(
-
-
                 current_squad_df=curr_squad_horizon,
-
-
                 candidate_league_df=league_eval_df,
-
-
                 team_value=team_val,
-
-
                 locked_player_ids=locked_players,
-
-
                 target_in_player_ids=targeted_in_players,
-
-
                 force_out_player_ids=force_out_players,
-
-
                 blocked_in_player_ids=blocked_in_players,
-
-
                 is_free_hit=(chip_mode == ":material/bolt:  Free Hit"),
-
-
             )
-
-
         else:
-
-
             transferred_squad_df, swaps = solve_multi_gw_transfers(
-
-
                 current_squad_df=curr_squad_horizon,
-
-
                 candidate_league_df=solver_candidate_df,
-
-
                 bank=bank_balance,
-
-
                 num_transfers=total_allowed_transfers,
-
-
                 locked_player_ids=locked_players,
-
-
                 target_in_player_ids=targeted_in_players,
-
-
                 force_out_player_ids=force_out_players,
-
-
                 blocked_in_player_ids=blocked_in_players,
-
-
                 min_avg_minutes=min_avg_mins,
-
-
             )
 
         st.session_state[state_key] = {
@@ -1623,7 +1540,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             "swaps": swaps,
             "curr_squad_horizon": curr_squad_horizon,
             "locked_players": locked_players,
-            "targeted_in_players": targeted_in_players
+            "targeted_in_players": targeted_in_players,
         }
         results_slot.empty()
 
@@ -1652,7 +1569,6 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
     base_pts = (base_xi["Horizon_xP"] * base_xi["Multiplier"]).sum() + 0.10 * (base_bench["Horizon_xP"].sum() if not base_bench.empty else 0)
     trans_pts = (trans_xi["Horizon_xP"] * trans_xi["Multiplier"]).sum() + 0.10 * (trans_bench["Horizon_xP"].sum() if not trans_bench.empty else 0)
-    calc_ft = calculate_available_fts(fetch_transfer_manager_history(st.session_state.get("fpl_manager_id", ""))) if st.session_state.get("fpl_manager_id") else 1
     actual_hit_cost = 0 if chip_mode != "Regular Transfers" else max(0, len(swaps) - ft_selected) * 4
     net_pts_gain = (trans_pts - base_pts) - actual_hit_cost
 
@@ -1668,25 +1584,14 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         m4.metric("Moves Executed", f"{len(swaps)} of {total_allowed_transfers}")
 
         if chip_mode == ":material/style:  Wildcard":
-
-
             st.markdown("### :material/style:  Optimal Wildcard Squad (Permanent Overhaul, 0 Hits)")
-
-
         elif chip_mode == ":material/bolt:  Free Hit":
-
-
             st.markdown("### :material/bolt:  Optimal Free Hit Squad (1-Week Maximum Ceiling, 0 Hits)")
-
-
         else:
-
-
-            hit_val = max(0, len(swaps) - calc_ft) * 4
-
-
+            hit_val = max(0, len(swaps) - ft_selected) * 4
             hit_str = f"-{hit_val} pts" if hit_val > 0 else "0 pts"
             st.markdown(f"### :material/my_location: Optimal Transfer Route ({len(swaps)} moves, {hit_str})")
+
         if not swaps:
             st.success(":material/check_circle:  Your current squad is optimal for this horizon. No transfer yields higher starting points within your budget.")
         else:
@@ -1796,10 +1701,19 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                         )
 
         with col_right:
+            squad_title = (
+                f"Optimal Wildcard Squad ({horizon_gws}-GW Run)"
+                if chip_mode == ":material/style:  Wildcard"
+                else (
+                    "Optimal Free Hit Squad"
+                    if chip_mode == ":material/bolt:  Free Hit"
+                    else f"Transfer Squad ({horizon_gws}-GW Run)"
+                )
+            )
             st.markdown(
                 f"""
                 <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    <span style="font-size: 0.92rem; font-weight: 700; color: {banner_title_col};">{f"Optimal Wildcard Squad ({horizon_gws}-GW Run)" if chip_mode == "Wildcard" else (f"Optimal Free Hit Squad" if chip_mode == "Free Hit" else f"Transfer Squad ({horizon_gws}-GW Run)")}</span>
+                    <span style="font-size: 0.92rem; font-weight: 700; color: {banner_title_col};">{squad_title}</span>
                     <span style="font-size: 0.80rem; font-weight: 600; color: {banner_sub_col}; margin-left: 6px;">({trans_formation} · {trans_pts:.1f} xP)</span>
                 </div>
                 """,
@@ -1842,9 +1756,9 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                         elif bool(row.get("is_transfer_in") is True):
                             tags.append(("Transfer In", "green"))
                         render_list_card(
-                            f"{row['Player']}  {row['Team']}",
+                            f"{row['Player']} · {row['Team']}",
                             tags,
-                            f'<span>Horizon xP</span> {fmt_num(row["Horizon_xP"], ".1f")}  <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
+                            f'<span>Horizon xP</span> {fmt_num(row["Horizon_xP"], ".1f")} · <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
                             img_url=get_player_img_url(row.get("photo"), row.get("code")),
                         )
 
@@ -1855,10 +1769,10 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                     "swaps": swaps,
                     "curr_squad_horizon": curr_squad_horizon,
                     "locked_players": locked_players,
-                    "targeted_in_players": targeted_in_players
+                    "targeted_in_players": targeted_in_players,
                 }
                 st.toast("Transfer Plan Saved! Navigate to Match Simulator to run scenarios.", icon=":material/check_circle: ")
-                
+
         st.markdown("### :material/content_paste:  Multi-Gameweek Performance Ledger")
         display_ledger = transferred_squad_df.copy()
         display_ledger["Role"] = display_ledger["id"].map(
@@ -1876,5 +1790,5 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         st.dataframe(
             display_ledger[cols_to_show].sort_values(by="Horizon_xP", ascending=False),
             hide_index=True,
-            width='stretch',
+            width="stretch",
         )

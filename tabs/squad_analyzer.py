@@ -185,6 +185,17 @@ def build_player_tooltip(p: pd.Series, is_live: bool = False) -> str:
         f'</div></div>'
     )
 
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_manager_transfers(manager_id: str):
+    try:
+        url = f"https://fantasy.premierleague.com/api/entry/{manager_id}/transfers/"
+        res = requests.get(url, timeout=10)
+        if res.status_code == 200:
+            return res.json()
+    except Exception:
+        pass
+    return []
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_manager_entry(manager_id: str):
     try:
@@ -1008,10 +1019,31 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
         picks_data = fetch_manager_picks(mgr_to_use, ongoing_gw or next_gw_id, next_gw_id)
         entry_history = picks_data.get("entry_history", {})
         transfers_cost = entry_history.get("event_transfers_cost", 0)
-        bank_balance = entry_history.get("bank", mgr_data.get("last_deadline_bank", 0)) / 10.0
+        base_bank = entry_history.get("bank", mgr_data.get("last_deadline_bank", 0))
 
         picks_list = picks_data.get("picks", [])
         pick_ids = [p["element"] for p in picks_list]
+        
+        # Apply any pending transfers for the upcoming gameweek
+        pending_transfers = fetch_manager_transfers(mgr_to_use)
+        if pending_transfers:
+            for t in reversed(pending_transfers):
+                if t.get("event") == next_gw_id:
+                    out_id = t.get("element_out")
+                    in_id = t.get("element_in")
+                    out_cost = t.get("element_out_cost")
+                    in_cost = t.get("element_in_cost")
+                    if out_id in pick_ids:
+                        idx = pick_ids.index(out_id)
+                        pick_ids[idx] = in_id
+                        base_bank = base_bank + out_cost - in_cost
+                        # Also update picks_list so order is maintained
+                        for p in picks_list:
+                            if p["element"] == out_id:
+                                p["element"] = in_id
+                                break
+                                
+        bank_balance = base_bank / 10.0
         if not pick_ids:
             st.warning("No squad picks found for this manager.")
             return
@@ -1120,6 +1152,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
         with col_gw_ref:
             if st.button(":material/sync:  Refresh", use_container_width=True, help="Sync prices, chip status, and odds snapshots"):
                 fetch_manager_entry.clear()
+                fetch_manager_transfers.clear()
                 fetch_manager_history.clear()
                 fetch_manager_picks.clear()
                 fetch_live_gameweek_points.clear()
