@@ -1235,37 +1235,6 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             with col_m2:
                 factor_movement = st.checkbox(":material/bolt:  Line Movement", value=True, key="tab4_factor_movement")
 
-        # BELOW the row: Lock Lineup
-        existing_snap = get_snapshot(conn, next_gw_id) if selected_eval_gw == next_gw_id else None
-        snap_locked = existing_snap is not None
-        
-        if selected_eval_gw == next_gw_id:
-            st.markdown("<div style='margin-top: 15px; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
-            col_lock_btn, col_lock_info = st.columns([1.5, 8.5], vertical_alignment="center")
-            
-            with col_lock_btn:
-                if snap_locked:
-                    lock_btn = st.button("Re-Lock Lineup", key="tab4_relock_btn")
-                else:
-                    lock_btn = st.button("Lock Lineup Snapshot", type="primary", key="tab4_lock_btn")
-            
-            with col_lock_info:
-                if snap_locked:
-                    st.markdown(
-                        f"<div style='font-size: 0.85rem; color: #22c55e; font-weight: 600;'>Locked at {existing_snap['timestamp']}</div>",
-                        unsafe_allow_html=True
-                    )
-                
-            if lock_btn:
-                save_snapshot(conn, next_gw_id, user_proj_xi_pts, optimal_formation, user_starters, user_bench)
-                st.toast(f"Snapshot locked for GW{next_gw_id}!", icon=":material/lock:")
-                st.rerun()
-                    
-            with col_lock_info:
-                if snap_locked:
-                    lock_time = existing_snap.get("created_at", "")[:16].replace("T", " ")
-                    st.markdown(f"<span style='color:#22c55e; font-size:0.85rem; font-weight:600;'>Locked at {lock_time}</span>", unsafe_allow_html=True)
-        
         is_finished_gw = selected_eval_gw in finished_gw_ids
         is_ongoing_gw = (selected_eval_gw == ongoing_gw)
         is_live_or_finished = is_finished_gw or is_ongoing_gw
@@ -1558,6 +1527,49 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             fdr_ease_pct = max(0.0, min(100.0, ((5.0 - avg_xi_fdr) / 3.0) * 100.0))
             pts_index_pct = max(0.0, min(100.0, (user_proj_xi_pts / 52.0) * 100.0))
             squad_rating = round((0.50 * fdr_ease_pct) + (0.50 * pts_index_pct), 1)
+
+            # BELOW the row: Lock Lineup
+            existing_snap = get_snapshot(conn, next_gw_id) if selected_eval_gw == next_gw_id else None
+            snap_locked = existing_snap is not None
+            
+            if selected_eval_gw == next_gw_id:
+                st.markdown("<div style='margin-top: 15px; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
+                col_lock_btn, col_lock_info = st.columns([1.5, 8.5], vertical_alignment="center")
+                
+                with col_lock_btn:
+                    if snap_locked:
+                        lock_btn = st.button("Re-Lock Lineup", key="tab4_relock_btn")
+                    else:
+                        lock_btn = st.button("Lock Lineup Snapshot", type="primary", key="tab4_lock_btn")
+                
+                with col_lock_info:
+                    if snap_locked:
+                        lock_time = existing_snap.get("created_at", "")[:16].replace("T", " ")
+                        st.markdown(
+                            f"<div style='font-size: 0.85rem; color: #22c55e; font-weight: 600;'>Locked at {lock_time}</div>",
+                            unsafe_allow_html=True
+                        )
+                    
+                if lock_btn:
+                    starters_list = optimal_xi.to_dict('records')
+                    for p in starters_list:
+                        p['is_starter'] = True
+                    bench_list = optimal_bench.to_dict('records')
+                    for p in bench_list:
+                        p['is_starter'] = False
+                    lineup_data = starters_list + bench_list
+                    
+                    save_pre_gw_snapshot(
+                        conn=conn, 
+                        gw=next_gw_id, 
+                        lineup_data=lineup_data, 
+                        formation=optimal_formation,
+                        market_weight=market_weight,
+                        factor_movement=factor_movement,
+                        chip=active_chip if chip_active_on_gw else None
+                    )
+                    st.toast(f"Snapshot locked for GW{next_gw_id}!", icon=":material/lock:")
+                    st.rerun()
 
             if enable_comparison:
                 if super_team_mode:
