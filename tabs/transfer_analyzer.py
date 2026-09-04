@@ -1257,8 +1257,20 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
     rolling_metrics_df = get_rolling_player_metrics(conn)
     teams_fdr_map = get_teams_fdr_map(conn, current_gw)
 
-    next_gw_row = events_df[events_df["is_next"] == 1]
-    next_gw = int(next_gw_row["id"].values[0]) if not next_gw_row.empty else current_gw
+    import time
+    now_epoch = int(time.time())
+    upcoming_gws = []
+    for _, r in events_df.iterrows():
+        is_fin = str(r.get("finished", "")).strip().lower() in ["1", "true", "yes"]
+        is_cur = str(r.get("is_current", "")).strip().lower() in ["1", "true", "yes"]
+        try:
+            dl_epoch = int(r.get("deadline_time_epoch", 2000000000))
+        except (ValueError, TypeError):
+            dl_epoch = 2000000000
+        if not is_fin and not (is_cur or dl_epoch <= now_epoch):
+            upcoming_gws.append(int(r["id"]))
+            
+    next_gw = upcoming_gws[0] if upcoming_gws else current_gw
 
     picks_data = fetch_transfer_manager_picks(mgr_to_use, next_gw)
     entry_hist = picks_data.get("entry_history", {})

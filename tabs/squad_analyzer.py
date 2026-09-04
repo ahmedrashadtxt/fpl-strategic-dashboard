@@ -1020,27 +1020,31 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
         import time
         now_epoch = int(time.time())
 
-        finished_gw_ids = (
-            [int(r["id"]) for _, r in events_df[events_df["finished"] == 1].iterrows()]
-            if "finished" in events_df.columns
-            else []
-        )
-
+        finished_gw_ids = []
         ongoing_gw_ids = []
+        upcoming_gws = []
+
         for _, r in events_df.iterrows():
             gw_id = int(r["id"])
-            if gw_id in finished_gw_ids:
-                continue
-            if r.get("is_current") == 1 or (not r.get("finished") and r.get("deadline_time_epoch", 2000000000) <= now_epoch):
+            
+            # Robust boolean parsing to handle SQLite/Pandas type variations (1, "1", True, "True")
+            is_fin = str(r.get("finished", "")).strip().lower() in ["1", "true", "yes"]
+            is_cur = str(r.get("is_current", "")).strip().lower() in ["1", "true", "yes"]
+            
+            try:
+                dl_epoch = int(r.get("deadline_time_epoch", 2000000000))
+            except (ValueError, TypeError):
+                dl_epoch = 2000000000
+                
+            if is_fin:
+                finished_gw_ids.append(gw_id)
+            elif is_cur or dl_epoch <= now_epoch:
                 ongoing_gw_ids.append(gw_id)
+            else:
+                upcoming_gws.append(gw_id)
 
         ongoing_gw = ongoing_gw_ids[0] if ongoing_gw_ids else None
         last_finished_gw = max(finished_gw_ids) if finished_gw_ids else None
-
-        upcoming_gws = [
-            int(r["id"]) for _, r in events_df.iterrows()
-            if int(r["id"]) not in finished_gw_ids and int(r["id"]) not in ongoing_gw_ids
-        ]
         next_gw_id = upcoming_gws[0] if upcoming_gws else current_gw
 
         picks_data = fetch_manager_picks(mgr_to_use, ongoing_gw or next_gw_id, next_gw_id)
