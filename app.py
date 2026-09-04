@@ -133,13 +133,13 @@ def _render_id_modal_body():
     st.markdown(
       """
       <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 12px; margin:10px 0 16px 0; font-size:0.8rem; color:#94a3b8; line-height:1.5;">
-        <strong style="color:#f8fafc;">:material/lightbulb:How to find your Team ID:</strong><br>
+        <strong style="color:#f8fafc;">How to find your Team ID:</strong><br>
         1. Log into <span style="color:#60a5fa;">fantasy.premierleague.com</span> and click the <strong>Points</strong> or <strong>Pick Team</strong> tab.<br>
         2. Check the URL in your browser's address bar:<br>
         <div style="margin-top:4px; padding:4px 8px; background:rgba(0,0,0,0.4); border-radius:4px; word-break:break-all; font-family:monospace;">
           https://fantasy.premierleague.com/entry/<span style="color:#4ade80; font-weight:800;">1234567</span>/event/2
         </div>
-        :material/arrow_right_alt:The number right after <code>/entry/</code> is your Team ID.
+        &#8594; The number right after <code>/entry/</code> is your Team ID.
       </div>
       """,
       unsafe_allow_html=True,
@@ -207,7 +207,7 @@ with col_search:
   mgr_name = st.session_state.get("manager_name", "")
   display_title = mgr_name or "My Team"
 
-  badge_label = f":material/person:{display_title} · #{curr_id} :material/edit:" if curr_id else " Enter FPL ID"
+  badge_label = f"{display_title} · #{curr_id}  (Edit)" if curr_id else "Enter FPL ID"
 
   st.markdown(
     """
