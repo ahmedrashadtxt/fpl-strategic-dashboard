@@ -237,7 +237,12 @@ def fetch_live_gameweek_points(eval_gw: int):
         res = requests.get(live_url, timeout=10)
         if res.status_code == 200:
             return {
-                item["id"]: item["stats"]["total_points"]
+                item["id"]: {
+                    "total_points": item["stats"]["total_points"],
+                    "minutes": item["stats"]["minutes"],
+                    "bonus": item["stats"]["bonus"],
+                    "bps": item["stats"]["bps"]
+                }
                 for item in res.json().get("elements", [])
             }
         return {}
@@ -762,8 +767,19 @@ def render_pitch_component(
                 pts = int(p.get("GW_Points", 0))
                 mult_txt = f" ({mult}x)" if mult > 1 else ""
                 pts_sub = f"{pts} pts{mult_txt}"
+                
+                live_mins = p.get("Live_Mins") or 0
+                live_bonus = p.get("Live_Bonus") or 0
+                live_bps = p.get("Live_BPS") or 0
+                
+                mins_str = f"{int(live_mins)}'" if live_mins > 0 else "0'"
+                bonus_str = f" (+{int(live_bonus)}B)" if live_bonus > 0 else (f" ({int(live_bps)} bps)" if live_bps > 0 else "")
+                
                 sub_color = "#4ade80" if pts >= 6 else "#f8fafc"
-                stat_pill_content = f'<span style="color: {sub_color};">{pts_sub}</span>'
+                stat_pill_content = (
+                    f'<span style="color: {sub_color}; font-weight: 700; display: block;">{pts_sub}</span>'
+                    f'<span style="color: #94a3b8; font-size: 0.62rem; display: block;">{mins_str}{bonus_str}</span>'
+                )
             else:
                 proj = p.get("Proj_Pts", 0.0)
                 cost = p.get("Cost", 0.0)
@@ -1081,7 +1097,10 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
 
         active_calc_gw = ongoing_gw if ongoing_gw else (last_finished_gw or next_gw_id)
         live_points_map = fetch_live_gameweek_points(active_calc_gw)
-        squad_df["Raw_GW_Pts"] = squad_df["id"].map(lambda x: live_points_map.get(x, 0))
+        squad_df["Raw_GW_Pts"] = squad_df["id"].map(lambda x: live_points_map.get(x, {}).get("total_points", 0))
+        squad_df["Live_Mins"] = squad_df["id"].map(lambda x: live_points_map.get(x, {}).get("minutes", 0))
+        squad_df["Live_Bonus"] = squad_df["id"].map(lambda x: live_points_map.get(x, {}).get("bonus", 0))
+        squad_df["Live_BPS"] = squad_df["id"].map(lambda x: live_points_map.get(x, {}).get("bps", 0))
         squad_df["GW_Points"] = squad_df["Raw_GW_Pts"] * squad_df["Multiplier"]
 
         starting_xi_pts = squad_df[squad_df["order"] <= 11]["GW_Points"].sum()
@@ -1248,7 +1267,10 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
 
             if selected_eval_gw != active_calc_gw:
                 eval_live_pts_map = fetch_live_gameweek_points(selected_eval_gw)
-                squad_df["Raw_GW_Pts"] = squad_df["id"].map(lambda x: eval_live_pts_map.get(x, 0))
+                squad_df["Raw_GW_Pts"] = squad_df["id"].map(lambda x: eval_live_pts_map.get(x, {}).get("total_points", 0))
+                squad_df["Live_Mins"] = squad_df["id"].map(lambda x: eval_live_pts_map.get(x, {}).get("minutes", 0))
+                squad_df["Live_Bonus"] = squad_df["id"].map(lambda x: eval_live_pts_map.get(x, {}).get("bonus", 0))
+                squad_df["Live_BPS"] = squad_df["id"].map(lambda x: eval_live_pts_map.get(x, {}).get("bps", 0))
                 squad_df["GW_Points"] = squad_df["Raw_GW_Pts"] * squad_df["Multiplier"]
                 starting_xi_pts = squad_df[squad_df["order"] <= 11]["GW_Points"].sum()
                 user_eval_pts = int(starting_xi_pts) - transfers_cost
@@ -1291,7 +1313,10 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 comp_df["is_vc"] = comp_df["id"].map(lambda x: comp_meta[x]["is_vice_captain"])
 
                 comp_live_pts_map = fetch_live_gameweek_points(selected_eval_gw)
-                comp_df["Raw_GW_Pts"] = comp_df["id"].map(lambda x: comp_live_pts_map.get(x, 0))
+                comp_df["Raw_GW_Pts"] = comp_df["id"].map(lambda x: comp_live_pts_map.get(x, {}).get("total_points", 0))
+                comp_df["Live_Mins"] = comp_df["id"].map(lambda x: comp_live_pts_map.get(x, {}).get("minutes", 0))
+                comp_df["Live_Bonus"] = comp_df["id"].map(lambda x: comp_live_pts_map.get(x, {}).get("bonus", 0))
+                comp_df["Live_BPS"] = comp_df["id"].map(lambda x: comp_live_pts_map.get(x, {}).get("bps", 0))
                 comp_df["GW_Points"] = comp_df["Raw_GW_Pts"] * comp_df["Multiplier"]
 
                 comp_starters = comp_df[comp_df["order"] <= 11].sort_values("order")
@@ -1319,7 +1344,26 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 """,
                 unsafe_allow_html=True,
             )
-
+            
+            # Compute formation
+            defs = len(user_starters[user_starters["Pos"] == "DEF"])
+            mids = len(user_starters[user_starters["Pos"] == "MID"])
+            fwds = len(user_starters[user_starters["Pos"] == "FWD"])
+            user_formation = f"{defs}-{mids}-{fwds}"
+            
+            pts_delta_str = f"{pts_diff:+d} vs Comp" if enable_comparison and comp_data else None
+            pts_label = "Current Points (Live)" if is_ongoing_gw else "Total Points (Finished)"
+            
+            col_met1, col_met2, col_met3, col_met4 = st.columns(4)
+            col_met1.metric("Squad Formation", user_formation)
+            col_met2.metric(pts_label, f"{user_eval_pts} pts", delta=pts_delta_str)
+            col_met3.metric("Manager Transfers", f"{transfers_cost // 4} made")
+            col_met4.metric(
+                "Squad Health",
+                f"{len(squad_df[squad_df['Status'] == 'a'])}/15 Fit",
+                delta="Available" if len(squad_df[squad_df['Status'] != 'a']) == 0 else "Flagged",
+            )
+            
             if enable_comparison and comp_data:
                 col_left, col_right = st.columns(2)
                 with col_left:
