@@ -554,7 +554,7 @@ def apply_market_projection_with_movement(
             "Market xG": round(mkt_team_xg, 2),
             "Diff": f"{diff:+.2f}",
             "CS Prob": f"{int(mkt_cs_prob * 100)}%",
-            "Verdict": "Market Bullish :material/trending_up: " if diff > 0 else "Market Bearish :material/trending_down: ",
+            "Verdict": "Market Bullish ↑" if diff > 0 else "Market Bearish ↓",
         }
 
     move_item = {
@@ -1666,13 +1666,13 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                         conn, current_gw, selected_eval_gw, enable_betting, market_weight, factor_movement
                     )
                     comp_target_label = "Super Team"
-                    comp_badge_icon = ":material/emoji_events: "
+                    comp_badge_icon = ""
                 else:
                     comp_xi, comp_bench, comp_formation = get_cached_league_dream_15(
                         conn, current_gw, selected_eval_gw, total_team_value, enable_betting, market_weight, factor_movement
                     )
                     comp_target_label = "Budget Dream 11"
-                    comp_badge_icon = ":material/star: "
+                    comp_badge_icon = ""
 
                 comp_xi["is_cap"] = False
                 comp_xi["is_vc"] = False
@@ -1780,7 +1780,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                     st.markdown(
                         f"""
                         <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">{comp_badge_icon} {comp_target_label} · GW{selected_eval_gw}</span>
+                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">{comp_target_label} · GW{selected_eval_gw}</span>
                             <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({comp_formation} · {comp_proj_xi_pts:.1f} xP)</span>
                         </div>
                         """,

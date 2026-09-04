@@ -245,7 +245,7 @@ def apply_market_projection_with_movement(
             "Market xG": round(mkt_team_xg, 2),
             "Diff": f"{diff:+.2f}",
             "CS Prob": f"{int(mkt_cs_prob * 100)}%",
-            "Verdict": "Market Bullish :material/trending_up: " if diff > 0 else "Market Bearish :material/trending_down: ",
+            "Verdict": "Market Bullish ↑" if diff > 0 else "Market Bearish ↓",
         }
 
     move_item = {
@@ -1743,7 +1743,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                 for idx, (_, row) in enumerate(trans_xi.iterrows()):
                     tags = [(row["Pos"], "blue")]
                     if bool(row.get("is_target_in") is True):
-                        tags.append(("Target In :material/my_location: ", "yellow"))
+                        tags.append(("Target In", "yellow"))
                     elif bool(row.get("is_transfer_in") is True):
                         tags.append(("Transfer In", "green"))
 
@@ -1764,7 +1764,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                         sub_label = "Sub GKP" if pos == "GKP" else f"Sub {idx}"
                         tags = [(pos, "blue"), (sub_label, "gray")]
                         if bool(row.get("is_target_in") is True):
-                            tags.append(("Target In :material/my_location: ", "yellow"))
+                            tags.append(("Target In", "yellow"))
                         elif bool(row.get("is_transfer_in") is True):
                             tags.append(("Transfer In", "green"))
                         render_list_card(
@@ -1789,7 +1789,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         display_ledger = transferred_squad_df.copy()
         display_ledger["Role"] = display_ledger["id"].map(
             lambda x: (
-                "Target Signing :material/my_location: "
+                "Target Signing"
                 if x in in_ids and x in (targeted_in_players or [])
                 else ("New Signing" if x in in_ids else ("Locked" if x in locked_players else "Retained"))
             )
