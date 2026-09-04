@@ -166,7 +166,7 @@ def build_player_tooltip(p: pd.Series, is_live: bool = False) -> str:
     news_row = ""
     if status != "a" and news and news != "None":
         clean_news = html.escape(news[:40] + ("..." if len(news) > 40 else ""))
-        news_row = f'<div class="tt-row tt-news"><span>:material/warning:  {clean_news}</span></div>'
+        news_row = f'<div class="tt-row tt-news"><span>[!] {clean_news}</span></div>'
 
     return (
         f'<div class="player-tooltip-card">'
@@ -1198,7 +1198,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             with col_lock_info:
                 if snap_locked:
                     lock_time = existing_snap.get("created_at", "")[:16].replace("T", " ")
-                    st.markdown(f"<span style='color:#22c55e; font-size:0.85rem; font-weight:600;'>:material/check_circle:  Locked at {lock_time}</span>", unsafe_allow_html=True)
+                    st.markdown(f"<span style='color:#22c55e; font-size:0.85rem; font-weight:600;'>Locked at {lock_time}</span>", unsafe_allow_html=True)
         
         is_finished_gw = selected_eval_gw in finished_gw_ids
         is_ongoing_gw = (selected_eval_gw == ongoing_gw)
@@ -1293,7 +1293,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                     st.markdown(
                         f"""
                         <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">:material/person:  Your Squad · GW{selected_eval_gw}</span>
+                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">Your Squad · GW{selected_eval_gw}</span>
                             <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({user_eval_pts} pts)</span>
                         </div>
                         """,
@@ -1310,7 +1310,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                     st.markdown(
                         f"""
                         <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">:material/emoji_events:  {comp_title}</span>
+                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">{comp_title}</span>
                             <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({comp_pts} pts)</span>
                         </div>
                         """,
@@ -1327,7 +1327,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 st.markdown(
                     f"""
                     <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px;">
-                        <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">:material/person:  Your Squad · GW{selected_eval_gw}</span>
+                        <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">Your Squad · GW{selected_eval_gw}</span>
                         <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({user_eval_pts} pts)</span>
                     </div>
                     """,
@@ -1542,7 +1542,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                     st.markdown(
                         f"""
                         <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">:material/person:  Your Optimal XI · GW{selected_eval_gw}</span>
+                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">Your Optimal XI · GW{selected_eval_gw}</span>
                             <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({optimal_formation} · {user_proj_xi_pts:.1f} xP)</span>
                         </div>
                         """,
@@ -1655,7 +1655,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                     st.markdown(
                         f"""
                         <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">:material/person:  Optimal Starting XI · GW{selected_eval_gw}</span>
+                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">Optimal Starting XI · GW{selected_eval_gw}</span>
                             <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({optimal_formation} · {user_proj_xi_pts:.1f} xP)</span>
                         </div>
                         """,

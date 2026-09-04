@@ -19,7 +19,7 @@ def render_simulator_tab(conn, events_df, current_gw):
         <div style="background-color: {banner_bg}; border: 1px solid {banner_border}; border-radius: 8px; padding: 0.85rem 1.1rem; margin: 0.4rem 0 1.5rem 0; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
-                    <span style="font-size: 1rem; font-weight: 700; color: {text_main};">:material/casino: Monte Carlo Gameweek Simulator</span><br>
+                    <span style="font-size: 1rem; font-weight: 700; color: {text_main};">Monte Carlo Gameweek Simulator</span><br>
                     <span style="font-size: 0.8rem; color: {text_sub};">Stress-test your squad across thousands of probabilistic match outcomes.</span>
                 </div>
             </div>

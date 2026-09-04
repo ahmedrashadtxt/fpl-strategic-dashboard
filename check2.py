@@ -1,1 +1,0 @@
-import pandas as pd, sqlite3; conn = sqlite3.connect('fpl.db'); df = pd.read_sql('SELECT web_name, can_select, status, chance_of_playing_next_round FROM players WHERE web_name LIKE ''%Kulusevski%''', conn); print(df)

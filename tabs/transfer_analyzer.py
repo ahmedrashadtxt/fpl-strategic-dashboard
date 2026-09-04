@@ -442,7 +442,7 @@ def evaluate_league_multi_gw(
         p_target = dict(p)
         p_target["is_target"] = True
 
-        for gw in range(start_gw, end_gw + 1):
+        for step, gw in enumerate(range(start_gw, end_gw + 1)):
             team_fixtures = fixture_map.get((team_id, gw), [])
 
             if not team_fixtures:
@@ -472,8 +472,9 @@ def evaluate_league_multi_gw(
                     gw_scaled_xp += final_xp
                     target_gw_scaled_xp += target_final_xp
 
-                total_horizon_xp += gw_scaled_xp
-                total_target_horizon_xp += target_gw_scaled_xp
+                decay_factor = 0.92 ** step
+                total_horizon_xp += (gw_scaled_xp * decay_factor)
+                total_target_horizon_xp += (target_gw_scaled_xp * decay_factor)
                 gw_breakdown[f"GW{gw}"] = round(gw_scaled_xp, 1)
                 target_gw_breakdown[f"Target_GW{gw}"] = round(target_gw_scaled_xp, 1)
 
@@ -615,17 +616,17 @@ def _maximize_leftover_budget(
 import pulp
 
 def solve_chip_transfers_pulp(
-    current_squad_df: pd.DataFrame,
-    candidate_league_df: pd.DataFrame,
+    current_squad_df,
+    candidate_league_df,
     team_value: float,
     locked_player_ids: list = None,
     target_in_player_ids: list = None,
     force_out_player_ids: list = None,
     blocked_in_player_ids: list = None,
     is_free_hit: bool = False,
-) -> tuple[pd.DataFrame, list[dict]]:
-    """Linear programming solver for 15-man squad overhaul (Wildcard/Free Hit)."""
+):
     import pulp
+    import pandas as pd
     locked_set = set(locked_player_ids or [])
     blocked_in_set = set(blocked_in_player_ids or [])
     target_in_set = set(target_in_player_ids or []) - blocked_in_set
@@ -640,15 +641,12 @@ def solve_chip_transfers_pulp(
     ].copy()
     
     top_cand_list = []
-    
     limits = {"GKP": 8, "DEF": 22, "MID": 25, "FWD": 16}
     for pos, limit in limits.items():
         pos_df = raw_avail[raw_avail["Pos"] == pos]
         if pos_df.empty: continue
-        
         top_xp = pos_df.sort_values(by="Horizon_xP", ascending=False).head(limit)
         cheapest = pos_df.sort_values(by="Cost", ascending=True).head(4)
-        
         top_cand_list.extend([top_xp, cheapest])
         
     current_in_raw = candidate_league_df[candidate_league_df["id"].isin(current_squad_df["id"].tolist())]
@@ -659,11 +657,11 @@ def solve_chip_transfers_pulp(
     if locked_set:
         top_cand_list.append(candidate_league_df[candidate_league_df["id"].isin(locked_set)])
         
-    import pandas as pd
     avail = pd.concat(top_cand_list, ignore_index=True).drop_duplicates(subset=["id"])
     
     player_vars = {}
     starter_vars = {}
+    cap_vars = {}
     
     cost_dict = avail.set_index("id")["Cost"].to_dict()
     xp_dict = avail.set_index("id")["Horizon_xP"].to_dict()
@@ -671,10 +669,13 @@ def solve_chip_transfers_pulp(
     for pid in avail["id"]:
         x = pulp.LpVariable(f"squad_{pid}", cat="Binary")
         y = pulp.LpVariable(f"start_{pid}", cat="Binary")
+        c = pulp.LpVariable(f"cap_{pid}", cat="Binary")
         player_vars[pid] = x
         starter_vars[pid] = y
+        cap_vars[pid] = c
         
         prob += y <= x
+        prob += c <= y
         if pid in locked_set or pid in target_in_set:
             prob += x == 1
         if pid in (force_out_player_ids or []) and pid not in locked_set:
@@ -685,8 +686,11 @@ def solve_chip_transfers_pulp(
     prob += pulp.lpSum(starter_vars[pid] for pid in avail[avail["Pos"] == "FWD"]["id"]) >= 1
     prob += pulp.lpSum(starter_vars.values()) == 11
     
+    prob += pulp.lpSum(cap_vars.values()) == 1
+    
     prob += pulp.lpSum(
         starter_vars[pid] * xp_dict[pid] +
+        cap_vars[pid] * xp_dict[pid] +
         0.10 * (player_vars[pid] - starter_vars[pid]) * xp_dict[pid]
         for pid in player_vars
     )
@@ -714,39 +718,11 @@ def solve_chip_transfers_pulp(
     final_squad["is_transfer_in"] = ~final_squad["id"].isin(current_squad_df["id"].tolist())
     final_squad["is_target_in"] = final_squad["id"].isin(target_in_set)
     
-    paired_transfers = []
-    out_players = current_squad_df[~current_squad_df["id"].isin(selected_pids)].to_dict("records")
-    in_players = final_squad[final_squad["is_transfer_in"]].to_dict("records")
+    final_squad["is_cap"] = final_squad["id"].apply(lambda pid: pulp.value(cap_vars.get(pid)) > 0.5 if pid in cap_vars else False)
+    final_squad["is_vc"] = False # Simple approximation, we can ignore VC for the solver display
     
-    # Position-matched swaps
-    matched_in_indices = set()
-    for p_out in list(out_players):
-        for i, p_in in enumerate(in_players):
-            if i not in matched_in_indices and p_in["Pos"] == p_out["Pos"]:
-                matched_in_indices.add(i)
-                paired_transfers.append({
-                    "out": p_out,
-                    "in": p_in,
-                    "gain": round(p_in["Horizon_xP"] - p_out.get("Horizon_xP", 0), 1),
-                    "cost_diff": round(p_in["Cost"] - p_out.get("Cost", 0), 1),
-                    "target": p_in["id"] in target_in_set,
-                    "forced_out": p_out["id"] in (force_out_player_ids or []),
-                })
-                out_players.remove(p_out)
-                break
-
-    # Leftovers
-    leftover_in = [p for i, p in enumerate(in_players) if i not in matched_in_indices]
-    for p_out, p_in in zip(out_players, leftover_in):
-        paired_transfers.append({
-            "out": p_out,
-            "in": p_in,
-            "gain": round(p_in["Horizon_xP"] - p_out.get("Horizon_xP", 0), 1),
-            "cost_diff": round(p_in["Cost"] - p_out.get("Cost", 0), 1),
-            "target": p_in["id"] in target_in_set,
-            "forced_out": p_out["id"] in (force_out_player_ids or []),
-        })
-        
+    paired_transfers = []
+    # (Chip solver doesn't really pair transfers, it's a completely new squad)
     return final_squad, paired_transfers
 
 
@@ -1674,9 +1650,11 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
     base_xi, base_bench = prepare_xi_display(raw_base_xi, raw_base_bench)
     trans_xi, trans_bench = prepare_xi_display(raw_trans_xi, raw_trans_bench)
 
-    base_pts = base_xi["Horizon_xP"].sum()
-    trans_pts = trans_xi["Horizon_xP"].sum()
-    net_pts_gain = (trans_pts - base_pts) - (max_hits * 4)
+    base_pts = (base_xi["Horizon_xP"] * base_xi["Multiplier"]).sum() + 0.10 * (base_bench["Horizon_xP"].sum() if not base_bench.empty else 0)
+    trans_pts = (trans_xi["Horizon_xP"] * trans_xi["Multiplier"]).sum() + 0.10 * (trans_bench["Horizon_xP"].sum() if not trans_bench.empty else 0)
+    calc_ft = calculate_available_fts(fetch_transfer_manager_history(st.session_state.get("fpl_manager_id", ""))) if st.session_state.get("fpl_manager_id") else 1
+    actual_hit_cost = 0 if chip_mode != "Regular Transfers" else max(0, len(swaps) - ft_selected) * 4
+    net_pts_gain = (trans_pts - base_pts) - actual_hit_cost
 
     with results_slot.container():
         m1, m2, m3, m4 = st.columns(4)
@@ -1684,7 +1662,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         m2.metric(
             "Net Projected Gain",
             f"{net_pts_gain:+.1f} xP",
-            delta=f"-{max_hits * 4} Hit Penalty" if max_hits > 0 else "Free Transfers",
+            delta=f"-{actual_hit_cost} Hit Penalty" if actual_hit_cost > 0 else "Free Transfers",
         )
         m3.metric("Remaining In Bank", f"£{(bank_balance - sum(s['cost_diff'] for s in swaps)):.1f}m")
         m4.metric("Moves Executed", f"{len(swaps)} of {total_allowed_transfers}")
