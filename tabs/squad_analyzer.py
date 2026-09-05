@@ -1418,24 +1418,45 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 unsafe_allow_html=True,
             )
             
-            # Compute formation
-            defs = len(user_starters[user_starters["Pos"] == "DEF"])
-            mids = len(user_starters[user_starters["Pos"] == "MID"])
-            fwds = len(user_starters[user_starters["Pos"] == "FWD"])
-            user_formation = f"{defs}-{mids}-{fwds}"
-            
-            pts_delta_str = f"{pts_diff:+d} vs Comp" if enable_comparison and comp_data else None
-            pts_label = "Current Points (Live)" if is_ongoing_gw else "Total Points (Finished)"
+            # Extract GW Rank
+            gw_rank = entry_history.get("rank")
+            if not gw_rank:
+                gw_rank_str = "Updating..."
+            else:
+                gw_rank_str = f"{gw_rank:,}"
+
+            # Calculate Players Played
+            played_count = len(user_starters[user_starters["Live_Mins"] > 0])
+            if is_finished_gw:
+                played_str = "All Played"
+            else:
+                played_str = f"{played_count} / 11"
+
+            # Get Captain Stats
+            cap_row = user_starters[user_starters["is_cap"] == True]
+            if not cap_row.empty:
+                cap_name = cap_row.iloc[0]["Player"]
+                cap_pts = cap_row.iloc[0]["GW_Points"]
+                cap_label = f"{cap_name} (C)"
+            else:
+                cap_label = "Captain (C)"
+                cap_pts = 0
+
+            # Determine delta/hit for Net GW Points
+            if enable_comparison and comp_data:
+                pts_delta_str = f"{pts_diff:+d} vs Comp" 
+            elif transfers_cost > 0:
+                pts_delta_str = f"-{transfers_cost} hit"
+            else:
+                pts_delta_str = None
+
+            pts_label = "Net GW Points (Live)" if is_ongoing_gw else "Net GW Points (Finished)"
             
             col_met1, col_met2, col_met3, col_met4 = st.columns(4)
-            col_met1.metric("Squad Formation", user_formation)
-            col_met2.metric(pts_label, f"{user_eval_pts} pts", delta=pts_delta_str)
-            col_met3.metric("Manager Transfers", f"{transfers_cost // 4} made")
-            col_met4.metric(
-                "Squad Health",
-                f"{len(squad_df[squad_df['Status'] == 'a'])}/15 Fit",
-                delta="Available" if len(squad_df[squad_df['Status'] != 'a']) == 0 else "Flagged",
-            )
+            col_met1.metric(pts_label, f"{user_eval_pts} pts", delta=pts_delta_str)
+            col_met2.metric("Gameweek Rank", gw_rank_str)
+            col_met3.metric("Players Played", played_str)
+            col_met4.metric(cap_label, f"{cap_pts} pts")
             
             if enable_comparison and comp_data:
                 col_left, col_right = st.columns(2)
