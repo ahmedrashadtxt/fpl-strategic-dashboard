@@ -105,9 +105,21 @@ teams_fdr_map = get_teams_fdr_map(conn, current_gw)
 # ── Robust Team ID Sync from Query Parameters ─────────────────────────────────
 url_param_team = str(st.query_params.get("team", "") or "").strip()
 if url_param_team:
-  st.session_state["manager_id"] = url_param_team
+  if st.session_state.get("manager_id") != url_param_team:
+    st.session_state["manager_id"] = url_param_team
+    st.session_state["manager_name"] = ""
 elif "manager_id" not in st.session_state:
   st.session_state["manager_id"] = ""
+
+if st.session_state.get("manager_id") and not st.session_state.get("manager_name"):
+  import requests
+  try:
+    res = requests.get(f"https://fantasy.premierleague.com/api/entry/{st.session_state['manager_id']}/", timeout=2)
+    if res.status_code == 200:
+      st.session_state["manager_name"] = res.json().get("name", "")
+  except:
+    pass
+
 
 
 # ── FPL ID Form Component ─────────────────────────────────────────────────────

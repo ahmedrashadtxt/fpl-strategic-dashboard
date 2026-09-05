@@ -356,7 +356,7 @@ def render_defensive_stats_tab(conn, current_gw):
     col_search, col1, col2, col3 = st.columns([1.4, 1.2, 1, 1.2])
     with col_search:
         search_query = st_keyup(
-            ":material/search:  Search Player / Club",
+            "Search Player / Club",
             placeholder="e.g. Gabriel, Raya, Saliba, ARS...",
             debounce=250,
             key="def_search_keyup",

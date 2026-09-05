@@ -216,7 +216,7 @@ def render_transfer_market_tab(conn, current_gw):
     col_search5, col_pos5, col_sort5 = st.columns([1.5, 1, 1.2])
     with col_search5:
         search_query5 = st_keyup(
-            ":material/search:  Search Player / Club",
+            "Search Player / Club",
             placeholder="e.g. Eze, Semenyo, Arsenal, LIV...",
             debounce=250,
             key="tab5_search_keyup",

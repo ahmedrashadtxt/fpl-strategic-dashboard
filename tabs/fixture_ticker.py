@@ -31,7 +31,7 @@ def render_fixture_ticker_tab(conn, current_gw):
     col_search3, col_sq3 = st.columns([2, 1])
     with col_search3:
         search_query3 = st_keyup(
-            ":material/search:  Search Player / Club",
+            "Search Player / Club",
             placeholder="e.g. Saka, Arsenal, Haaland, MCI...",
             debounce=250,
             key="tab3_search_keyup",

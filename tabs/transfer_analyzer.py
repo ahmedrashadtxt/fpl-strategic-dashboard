@@ -1327,7 +1327,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
     chip_mode = st.radio(
         "Strategy Mode:",
-        ["Regular Transfers", ":material/style:  Wildcard", ":material/bolt:  Free Hit"],
+        ["Regular Transfers", "Wildcard", "Free Hit"],
         horizontal=True,
         index=0,
     )
@@ -1350,7 +1350,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             hit_cost_str = f"(-{max_hits * 4} pts)" if max_hits > 0 else "(0 pts)"
             st.metric("Planned Moves", f"{total_allowed_transfers} Transfers", delta=hit_cost_str if max_hits > 0 else None, delta_color="inverse")
 
-    elif chip_mode == ":material/style:  Wildcard":
+    elif chip_mode == "Wildcard":
         horizon_gws = st.selectbox(
             "Evaluation Horizon",
             options=[3, 5, 8],
@@ -1439,29 +1439,28 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
     for _, r in squad_df.iterrows():
         key = f"lock_{r['id']}"
         pos_options.append(key)
-        pos_labels[key] = f":material/lock:  Keep: {r['Player']} ({r['Team']} · {r['Pos']})"
+        pos_labels[key] = f"[Lock] Keep: {r['Player']} ({r['Team']} · {r['Pos']})"
 
     for _, r in available_market_df.iterrows():
         key = f"target_{r['id']}"
         pos_options.append(key)
-        pos_labels[key] = f":material/my_location:  Target: {r['Player']} ({r['Team']} · {r['Pos']} · £{r['Cost']:.1f}m · {r['Horizon_xP']:.1f} xP)"
+        pos_labels[key] = f"[Target] Target: {r['Player']} ({r['Team']} · {r['Pos']} · £{r['Cost']:.1f}m · {r['Horizon_xP']:.1f} xP)"
 
     neg_options = []
     neg_labels = {}
     for _, r in squad_df.iterrows():
         key = f"sell_{r['id']}"
         neg_options.append(key)
-        neg_labels[key] = f":material/circle:  Sell: {r['Player']} ({r['Team']} · {r['Pos']})"
+        neg_labels[key] = f"[Sell] Sell: {r['Player']} ({r['Team']} · {r['Pos']})"
 
     for _, r in available_market_df.iterrows():
         key = f"block_{r['id']}"
         neg_options.append(key)
-        neg_labels[key] = f":material/block:  Blacklist: {r['Player']} ({r['Team']} · {r['Pos']} · £{r['Cost']:.1f}m)"
+        neg_labels[key] = f"[Blacklist] Blacklist: {r['Player']} ({r['Team']} · {r['Pos']} · £{r['Cost']:.1f}m)"
 
     col_pos, col_neg = st.columns(2)
     with col_pos:
-        selected_positive = st.multiselect(
-            ":material/check_circle:  Priorities & Locks",
+        selected_positive = st.multiselect("Priorities & Locks",
             options=pos_options,
             format_func=lambda k: pos_labels.get(k, k),
             default=[],
@@ -1471,8 +1470,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         targeted_in_players = [int(k.replace("target_", "")) for k in selected_positive if k.startswith("target_")]
 
     with col_neg:
-        selected_negative = st.multiselect(
-            ":material/close:  Forced Sales & Blacklist",
+        selected_negative = st.multiselect("Forced Sales & Blacklist",
             options=neg_options,
             format_func=lambda k: neg_labels.get(k, k),
             default=[],
@@ -1524,7 +1522,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                 _missing_df[f"GW{_gw}"] = 0.0
             curr_squad_horizon = pd.concat([curr_squad_horizon, _missing_df], ignore_index=True)
 
-        if chip_mode in [":material/style:  Wildcard", ":material/bolt:  Free Hit"]:
+        if chip_mode in ["Wildcard", "Free Hit"]:
             transferred_squad_df, swaps = solve_chip_transfers_pulp(
                 current_squad_df=curr_squad_horizon,
                 candidate_league_df=league_eval_df,
@@ -1533,7 +1531,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                 target_in_player_ids=targeted_in_players,
                 force_out_player_ids=force_out_players,
                 blocked_in_player_ids=blocked_in_players,
-                is_free_hit=(chip_mode == ":material/bolt:  Free Hit"),
+                is_free_hit=(chip_mode == "Free Hit"),
             )
         else:
             transferred_squad_df, swaps = solve_multi_gw_transfers(
@@ -1596,9 +1594,9 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         m3.metric("Remaining In Bank", f"£{(bank_balance - sum(s['cost_diff'] for s in swaps)):.1f}m")
         m4.metric("Moves Executed", f"{len(swaps)} of {total_allowed_transfers}")
 
-        if chip_mode == ":material/style:  Wildcard":
+        if chip_mode == "Wildcard":
             st.markdown("### :material/style:  Optimal Wildcard Squad (Permanent Overhaul, 0 Hits)")
-        elif chip_mode == ":material/bolt:  Free Hit":
+        elif chip_mode == "Free Hit":
             st.markdown("### :material/bolt:  Optimal Free Hit Squad (1-Week Maximum Ceiling, 0 Hits)")
         else:
             hit_val = max(0, len(swaps) - ft_selected) * 4
@@ -1716,10 +1714,10 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         with col_right:
             squad_title = (
                 f"Optimal Wildcard Squad ({horizon_gws}-GW Run)"
-                if chip_mode == ":material/style:  Wildcard"
+                if chip_mode == "Wildcard"
                 else (
                     "Optimal Free Hit Squad"
-                    if chip_mode == ":material/bolt:  Free Hit"
+                    if chip_mode == "Free Hit"
                     else f"Transfer Squad ({horizon_gws}-GW Run)"
                 )
             )

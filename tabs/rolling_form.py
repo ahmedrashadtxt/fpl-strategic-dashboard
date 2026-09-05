@@ -185,7 +185,7 @@ def render_rolling_form_tab(conn, current_gw: int = 1, teams_fdr_map: dict = Non
     )
     with col_search2:
         search_query2 = st_keyup(
-            ":material/search:  Search Player / Club",
+            "Search Player / Club",
             placeholder="e.g. Cherki, Saka, Chelsea, ARS...",
             debounce=250,
             key="tab2_search_keyup",
