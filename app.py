@@ -124,6 +124,7 @@ if st.session_state.get("manager_id") and not st.session_state.get("manager_name
 
 # ── FPL ID Form Component ─────────────────────────────────────────────────────
 def _render_id_modal_body():
+  active_gw_display = max(1, current_gw - 1)
   st.markdown(
     """
     <style>
@@ -143,13 +144,13 @@ def _render_id_modal_body():
     )
 
     st.markdown(
-      """
+      f"""
       <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 12px; margin:10px 0 16px 0; font-size:0.8rem; color:#94a3b8; line-height:1.5;">
         <strong style="color:#f8fafc;">How to find your Team ID:</strong><br>
         1. Log into <span style="color:#60a5fa;">fantasy.premierleague.com</span> and click the <strong>Points</strong> or <strong>Pick Team</strong> tab.<br>
         2. Check the URL in your browser's address bar:<br>
         <div style="margin-top:4px; padding:4px 8px; background:rgba(0,0,0,0.4); border-radius:4px; word-break:break-all; font-family:monospace;">
-          https://fantasy.premierleague.com/entry/<span style="color:#4ade80; font-weight:800;">1234567</span>/event/2
+          https://fantasy.premierleague.com/entry/<span style="color:#4ade80; font-weight:800;">1234567</span>/event/{active_gw_display}
         </div>
         &#8594; The number right after <code>/entry/</code> is your Team ID.
       </div>
