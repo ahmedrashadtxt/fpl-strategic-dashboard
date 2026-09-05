@@ -132,9 +132,10 @@ def compute_active_solver_squad(conn, manager_id: str, target_gw: int, current_g
 # ── Tab Renderer ─────────────────────────────────────────────────────────────
 def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
     init_audit_tables(conn)
+    is_dark = st.session_state.get("theme_mode", "dark") == "dark"
 
     section_header(
-        ":material/bar_chart:  Model Audit & Performance Journal",
+        "Model Audit & Performance Journal",
         "Inspect locked solver versions, track pre-match line shifts, and audit prediction variance against final outcomes.",
     )
 
@@ -164,7 +165,7 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
                 "Snapshot Version:",
                 options=version_options,
                 format_func=lambda ver: (
-                    f"Version {ver} (Latest / Final :material/star: )" if ver == version_options[0] 
+                    f"Version {ver} (Latest / Final)" if ver == version_options[0] 
                     else f"Version {ver} (Locked {next((v.get('created_at') or '')[:16].replace('T', ' ') for v in all_versions if v['version'] == ver)} UTC)"
                 ),
                 key=f"audit_ver_select_gw_{selected_gw}",
@@ -288,9 +289,9 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
     with c_view_title:
         st.markdown(f"### :material/shield:  Locked Lineup: GW{selected_gw} (Version {selected_version})")
     with c_view_toggle:
-        view_mode = st.radio("View Mode:", [":material/stadium: Pitch", ":material/content_paste:  Table"], horizontal=True, key=f"view_mode_gw_{selected_gw}")
+        view_mode = st.radio("View Mode:", ["Pitch", "Table"], horizontal=True, key=f"view_mode_gw_{selected_gw}")
 
-    if "Pitch" in view_mode:
+    if view_mode == "Pitch":
         rolling_metrics_df = get_rolling_player_metrics(conn)
         teams_fdr_map = get_teams_fdr_map(conn, current_gw)
         render_pitch_component(
@@ -303,7 +304,7 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
     else:
         st.markdown("#### Starting XI")
         table_starters = pd.DataFrame([{
-            "Role": "Captain :material/emoji_events: " if p.get("is_cap") else ("Vice :material/emoji_events: " if p.get("is_vc") else "Starter"),
+            "Role": "Captain" if p.get("is_cap") else ("Vice" if p.get("is_vc") else "Starter"),
             "Player": p["web_name"],
             "Team": p.get("Team", "-"),
             "Pos": p.get("Pos", "-"),
