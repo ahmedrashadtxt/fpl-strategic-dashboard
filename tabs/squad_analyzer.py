@@ -1088,6 +1088,16 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
         total_points = mgr_data.get("summary_overall_points", 0)
         overall_rank = mgr_data.get("summary_overall_rank", 0)
 
+        current_season_history = mgr_history.get("current", [])
+        rank_delta_str = None
+        if len(current_season_history) >= 2:
+            latest_rank = current_season_history[-1].get("overall_rank", overall_rank)
+            prev_rank = current_season_history[-2].get("overall_rank", latest_rank)
+            rank_diff = prev_rank - latest_rank
+            
+            if rank_diff != 0:
+                rank_delta_str = f"{rank_diff:+,}"
+
         import time
         now_epoch = int(time.time())
 
@@ -1199,7 +1209,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
 
         m1, m2, m3, m4, m5, m6 = st.columns(6)
         m1.metric("Manager", mgr_data.get("name", "My Team"))
-        m2.metric("Overall Rank", f"{overall_rank:,}")
+        m2.metric("Overall Rank", f"{overall_rank:,}", delta=rank_delta_str)
         m3.metric("Total Points", f"{total_points:,}")
         m4.metric(
             "Active GW",
