@@ -198,7 +198,7 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
                         st.error(f"Live data for GW{selected_gw} is not available yet.")
                     else:
                         clean_points_map = {
-                            pid: data["points"] if isinstance(data, dict) else data 
+                            pid: data.get("total_points", data.get("points", 0)) if isinstance(data, dict) else data 
                             for pid, data in raw_live_map.items()
                         }
                         settle_post_gw_snapshot(conn, selected_gw, clean_points_map, target_version=selected_version)
