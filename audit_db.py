@@ -39,6 +39,7 @@ def init_audit_tables(conn:sqlite3.Connection):
           vice_captain_id INTEGER,
           vice_captain_name TEXT,
           vice_actual_pts INTEGER,
+          source TEXT DEFAULT 'Squad Analyzer',
           PRIMARY KEY (gw, version)
         )
       """)
@@ -57,6 +58,11 @@ def init_audit_tables(conn:sqlite3.Connection):
       cursor.execute("ALTER TABLE gw_audit_snapshots_v2 RENAME TO gw_audit_snapshots")
       conn.commit()
       return
+
+    # If missing source column, add it safely
+    if "source" not in cols:
+      cursor.execute("ALTER TABLE gw_audit_snapshots ADD COLUMN source TEXT DEFAULT 'Squad Analyzer'")
+      conn.commit()
 
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS gw_audit_snapshots (
@@ -81,6 +87,7 @@ def init_audit_tables(conn:sqlite3.Connection):
       vice_captain_id INTEGER,
       vice_captain_name TEXT,
       vice_actual_pts INTEGER,
+      source TEXT DEFAULT 'Squad Analyzer',
       PRIMARY KEY (gw, version)
     )
   """)
@@ -95,6 +102,7 @@ def save_pre_gw_snapshot(
   formation:str = "4-4-2",
   market_weight:float = 0.35,
   factor_movement:bool = True,
+  source:str = "Squad Analyzer",
 ) -> int:
   """Saves a new incremental version snapshot for the gameweek."""
   transfers_data = transfers_data or []
@@ -124,8 +132,8 @@ def save_pre_gw_snapshot(
     INSERT INTO gw_audit_snapshots (
       gw, version, created_at, status, chip_played, formation, market_weight, 
       factor_movement, lineup_json, transfers_json, predicted_total, 
-      captain_id, captain_name, vice_captain_id, vice_captain_name
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      captain_id, captain_name, vice_captain_id, vice_captain_name, source
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   """, (
     gw,
     new_version,
@@ -142,6 +150,7 @@ def save_pre_gw_snapshot(
     cap_name,
     vice["id"] if vice else None,
     vc_name,
+    source,
   ))
   conn.commit()
   return new_version
@@ -169,7 +178,7 @@ def get_all_gw_versions(conn:sqlite3.Connection, gw:int) -> list[dict]:
   cursor = conn.cursor()
   cursor.execute("""
     SELECT version, created_at, status, predicted_total, actual_total, 
-        variance_pts, market_weight, formation, captain_name 
+        variance_pts, market_weight, formation, captain_name, source 
     FROM gw_audit_snapshots 
     WHERE gw = ? 
     ORDER BY version DESC

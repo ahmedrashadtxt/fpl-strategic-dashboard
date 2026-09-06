@@ -1,6 +1,7 @@
 import html
 import math
 import os
+import textwrap
 import pandas as pd
 import requests
 import streamlit as st
@@ -1048,6 +1049,434 @@ def render_pitch_component(
     )
     st.markdown(full_pitch_html, unsafe_allow_html=True)
 
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_live_fixtures(gw: int):
+    try:
+        url = f"https://fantasy.premierleague.com/api/fixtures/?event={gw}"
+        res = requests.get(url, timeout=5)
+        if res.status_code == 200:
+            return {f["id"]: f for f in res.json()}
+    except Exception:
+        pass
+    return {}
+
+def enrich_live_squad_with_fixtures_and_xp(squad_df, conn, selected_gw, current_gw):
+    try:
+        gw_fixtures_df = pd.read_sql(
+            """
+            SELECT f.id, f.event AS GW, f.team_h AS team_h_id, f.team_a AS team_a_id,
+                   th.short_name AS Home_Team, ta.short_name AS Away_Team,
+                   f.team_h_difficulty AS Home_Diff, f.team_a_difficulty AS Away_Diff,
+                   f.started, f.finished, f.finished_provisional, f.minutes,
+                   f.team_h_score, f.team_a_score
+            FROM fixtures f
+            INNER JOIN teams th ON f.team_h = th.id
+            INNER JOIN teams ta ON f.team_a = ta.id
+            WHERE f.event = ?
+            """,
+            conn,
+            params=[selected_gw],
+        )
+    except Exception:
+        gw_fixtures_df = pd.DataFrame()
+
+    api_fixes = fetch_live_fixtures(selected_gw)
+    try:
+        hist_baselines_df = get_historical_player_baselines(conn)
+    except Exception:
+        hist_baselines_df = pd.DataFrame()
+
+    opponents = []
+    fdrs = []
+    is_homes = []
+    status_list = []
+    match_status_desc = []
+    xp_list = []
+
+    for _, row in squad_df.iterrows():
+        tid = row.get("team_id") or row.get("team")
+        match = gw_fixtures_df[(gw_fixtures_df["team_h_id"] == tid) | (gw_fixtures_df["team_a_id"] == tid)] if not gw_fixtures_df.empty else pd.DataFrame()
+        if match.empty:
+            opponents.append("Blank")
+            fdrs.append(5)
+            is_homes.append(False)
+            status_list.append("finished")
+            match_status_desc.append("Blank")
+            xp_list.append(0.0)
+            continue
+
+        opp_parts = []
+        fdrs_part = []
+        started_any = False
+        finished_all = True
+        match_mins_max = 0
+
+        for _, f_row in match.iterrows():
+            fid = f_row["id"]
+            live_f = api_fixes.get(fid, {})
+            is_home = (f_row["team_h_id"] == tid)
+            opp_team = f_row["Away_Team"] if is_home else f_row["Home_Team"]
+            fdr_val = int(f_row["Home_Diff"] if is_home else f_row["Away_Diff"])
+            opp_parts.append(f"{opp_team} (H)" if is_home else f"{opp_team} (A)")
+            fdrs_part.append(fdr_val)
+
+            f_started = bool(live_f.get("started", f_row["started"]))
+            f_finished = bool(live_f.get("finished", f_row["finished"]) or live_f.get("finished_provisional", f_row["finished_provisional"]))
+            f_mins = int(live_f.get("minutes", f_row["minutes"]) or 0)
+            if f_mins > match_mins_max:
+                match_mins_max = f_mins
+
+            if f_started:
+                started_any = True
+            if not f_finished:
+                finished_all = False
+
+        opp_str = " & ".join(opp_parts)
+        fdr = int(round(sum(fdrs_part) / len(fdrs_part))) if fdrs_part else 3
+        is_home_primary = (match.iloc[0]["team_h_id"] == tid)
+
+        p_mins = int(row.get("Live_Mins") or 0)
+        fix_info = {"opponent": opp_str, "fdr": fdr, "is_home": is_home_primary}
+        base_xp = calculate_projected_points(row.to_dict(), fix_info, current_gw, hist_baselines_df)
+        mult = int(round(float(row.get("Multiplier", 1)))) if pd.notna(row.get("Multiplier")) else 1
+        final_xp = round(base_xp * mult, 1)
+
+        if finished_all or p_mins >= 90:
+            status_kind = "finished"
+            status_desc = f"FT · {p_mins}'" if p_mins > 0 else "FT · Unused"
+        elif started_any or p_mins > 0:
+            status_kind = "live"
+            display_mins = p_mins if p_mins > 0 else match_mins_max
+            status_desc = f"LIVE {display_mins}'"
+        else:
+            status_kind = "upcoming"
+            status_desc = "Yet to Play"
+
+        opponents.append(opp_str)
+        fdrs.append(fdr)
+        is_homes.append(is_home_primary)
+        status_list.append(status_kind)
+        match_status_desc.append(status_desc)
+        xp_list.append(final_xp)
+
+    squad_df["Opponent"] = opponents
+    squad_df["FDR"] = fdrs
+    squad_df["Is_Home"] = is_homes
+    squad_df["Match_Status"] = status_list
+    squad_df["Match_Status_Desc"] = match_status_desc
+    squad_df["Proj_Pts"] = xp_list
+
+    return squad_df
+
+def render_match_tracker_sidebar(starters_df, bench_df, user_eval_pts=0, is_dark=True):
+    bg_panel = "#141414" if is_dark else "#ffffff"
+    border_panel = "#27272a" if is_dark else "#e2e8f0"
+    text_main = "#f8fafc" if is_dark else "#0f172a"
+    text_sub = "#94a3b8" if is_dark else "#64748b"
+    row_border = "rgba(255, 255, 255, 0.05)" if is_dark else "#f1f5f9"
+    stat_box_bg = "rgba(255, 255, 255, 0.03)" if is_dark else "#f8fafc"
+    stat_box_border = "rgba(255, 255, 255, 0.07)" if is_dark else "#e2e8f0"
+
+    played_starters = starters_df[starters_df["Match_Status"].isin(["finished", "live"])] if "Match_Status" in starters_df.columns else pd.DataFrame()
+    upcoming_starters = starters_df[starters_df["Match_Status"] == "upcoming"] if "Match_Status" in starters_df.columns else starters_df
+
+    played_count = len(played_starters)
+    total_starters = len(starters_df)
+    played_label = f"{played_count}/{total_starters} Played" if total_starters > 0 else f"{played_count} Played"
+    remaining_xp = float(upcoming_starters["Proj_Pts"].sum()) if not upcoming_starters.empty and "Proj_Pts" in upcoming_starters.columns else 0.0
+    projected_final = user_eval_pts + remaining_xp
+    has_remaining_xp = round(remaining_xp, 1) > 0.0
+    score_label = "Score + xP" if has_remaining_xp else "Score"
+    xp_addon = f' <span style="font-size: 0.72rem; font-weight: 600; color: #60a5fa;">(+{remaining_xp:.1f} xP)</span>' if has_remaining_xp else ""
+    projected_html = (
+        f"""<div style="text-align: right;">
+            <span style="font-size: 0.64rem; color: {text_sub}; text-transform: uppercase; font-weight: 700; letter-spacing: 0.03em;">Projected</span><br>
+            <span style="font-size: 0.90rem; font-weight: 800; color: #4ade80;">{projected_final:.1f} pts</span>
+        </div>"""
+        if has_remaining_xp else ""
+    )
+
+    def build_player_row(row, is_bench=False, bench_label=""):
+        p_name = html.escape(str(row.get("Player", "")))
+        pos = str(row.get("Pos", ""))
+        mult = int(round(float(row.get("Multiplier", 1)))) if pd.notna(row.get("Multiplier")) else 1
+        is_c = (row.get("is_cap") is True or row.get("is_cap") == 1) or mult >= 2
+        is_v = (row.get("is_vc") is True or row.get("is_vc") == 1) and not is_c
+
+        cap_badge = ""
+        if mult == 3:
+            cap_badge = '<span class="trk-cap-badge trk-tc">3x</span>'
+        elif is_c:
+            cap_badge = '<span class="trk-cap-badge trk-c">C</span>'
+        elif is_v:
+            cap_badge = '<span class="trk-cap-badge trk-vc">V</span>'
+
+        img_url = get_player_img_url(row.get("photo"), row.get("code"))
+        clean_url = html.escape(str(img_url))
+
+        opp = html.escape(str(row.get("Opponent", "-")))
+        fdr = int(row.get("FDR", 3))
+        fdr_col = "#4ade80" if fdr <= 2 else ("#facc15" if fdr == 3 else "#f87171")
+
+        status = row.get("Match_Status", "upcoming")
+        p_mins = int(row.get("Live_Mins") or 0)
+        gw_pts = int(row.get("GW_Points", 0))
+        xp_val = float(row.get("Proj_Pts", 0.0))
+
+        if status == "finished":
+            val_html = f'<span class="trk-val pts">{gw_pts} pts</span>'
+            status_badge = f'<span class="trk-badge badge-ft">FT</span>'
+        elif status == "live":
+            val_html = f'<span class="trk-val pts live">{gw_pts} pts</span>'
+            live_label = f"&bull; {p_mins}'" if p_mins > 0 else "&bull; LIVE"
+            status_badge = f'<span class="trk-badge badge-live">{live_label}</span>'
+        else:
+            val_html = f'<span class="trk-val xp">{xp_val:.1f} xP</span>'
+            status_badge = f'<span class="trk-badge badge-yet">Yet to play</span>'
+
+        sub_label_html = f'<span class="trk-sub-role">{bench_label} &middot; </span>' if is_bench else ""
+
+        return textwrap.dedent(f"""
+        <div class="trk-row">
+            <div class="trk-left">
+                <div class="trk-avatar" style="background-image: url('{clean_url}'), url('{SILHOUETTE_BASE64}');"></div>
+                <div class="trk-meta">
+                    <div class="trk-name-row">
+                        <span class="trk-name">{p_name}</span>
+                        {cap_badge}
+                    </div>
+                    <div class="trk-sub">
+                        {sub_label_html}<span class="trk-pos">{pos}</span> &middot; <span style="color: {fdr_col}; font-weight: 600;">{opp}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="trk-right">
+                {val_html}
+                {status_badge}
+            </div>
+        </div>
+        """).strip()
+
+    starters_html = "\n".join(build_player_row(r) for _, r in starters_df.iterrows())
+
+    bench_html = ""
+    if bench_df is not None and not bench_df.empty:
+        bench_rows = []
+        for idx, (_, b) in enumerate(bench_df.iterrows()):
+            role = "Sub GKP" if b.get("Pos") == "GKP" else f"Sub {idx}"
+            bench_rows.append(build_player_row(b, is_bench=True, bench_label=role))
+        bench_html = textwrap.dedent(f"""
+        <div class="trk-bench-hdr">Bench Substitutes</div>
+        {"".join(bench_rows)}
+        """).strip()
+
+    sidebar_html = textwrap.dedent(f"""
+    <style>
+    .trk-card {{
+        background: {bg_panel};
+        border: 1px solid {border_panel};
+        border-radius: 12px;
+        padding: 12px 14px;
+        height: 680px;
+        max-height: 680px;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }}
+    .trk-header-bar {{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid {row_border};
+    }}
+    .trk-title {{
+        font-family: 'Outfit', sans-serif;
+        font-size: 0.92rem;
+        font-weight: 700;
+        color: {text_main};
+    }}
+    .trk-summary-box {{
+        background: {stat_box_bg};
+        border: 1px solid {stat_box_border};
+        border-radius: 8px;
+        padding: 6px 10px;
+        margin-bottom: 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-shrink: 0;
+    }}
+    .trk-list-container {{
+        overflow-y: auto;
+        flex: 1;
+        padding-right: 4px;
+    }}
+    .trk-list-container::-webkit-scrollbar {{
+        width: 4px;
+    }}
+    .trk-list-container::-webkit-scrollbar-thumb {{
+        background: rgba(255, 255, 255, 0.16);
+        border-radius: 2px;
+    }}
+    .trk-row {{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 2px;
+        border-bottom: 1px solid {row_border};
+        transition: background 0.15s ease;
+    }}
+    .trk-row:hover {{
+        background: rgba(255, 255, 255, 0.02);
+    }}
+    .trk-row:last-child {{
+        border-bottom: none;
+    }}
+    .trk-left {{
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        flex: 1;
+    }}
+    .trk-avatar {{
+        width: 28px;
+        height: 28px;
+        min-width: 28px;
+        min-height: 28px;
+        border-radius: 50%;
+        background-size: cover, cover;
+        background-position: top center, center;
+        background-repeat: no-repeat, no-repeat;
+        border: 1.5px solid rgba(255, 255, 255, 0.2);
+        background-color: #1e293b;
+        flex-shrink: 0;
+    }}
+    .trk-meta {{
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 0;
+    }}
+    .trk-name-row {{
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }}
+    .trk-name {{
+        font-family: 'Inter', sans-serif;
+        font-size: 0.80rem;
+        font-weight: 700;
+        color: {text_main};
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }}
+    .trk-cap-badge {{
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-size: 0.60rem;
+        font-weight: 800;
+        line-height: 1;
+    }}
+    .trk-c {{ background: #22c55e; color: #ffffff; }}
+    .trk-tc {{ background: #eab308; color: #000000; }}
+    .trk-vc {{ background: #3b82f6; color: #ffffff; }}
+    .trk-sub {{
+        font-size: 0.68rem;
+        color: {text_sub};
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }}
+    .trk-pos {{
+        font-weight: 600;
+        color: {text_sub};
+    }}
+    .trk-sub-role {{
+        color: #eab308;
+        font-weight: 600;
+    }}
+    .trk-right {{
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 2px;
+        flex-shrink: 0;
+        margin-left: 6px;
+    }}
+    .trk-val {{
+        font-size: 0.80rem;
+        font-weight: 800;
+        white-space: nowrap;
+    }}
+    .trk-val.pts {{ color: {text_main}; }}
+    .trk-val.pts.live {{ color: #22c55e; }}
+    .trk-val.xp {{ color: #60a5fa; }}
+    .trk-badge {{
+        font-size: 0.60rem;
+        font-weight: 700;
+        padding: 1px 4px;
+        border-radius: 4px;
+        white-space: nowrap;
+    }}
+    .badge-ft {{
+        background: rgba(148, 163, 184, 0.15);
+        color: {text_sub};
+    }}
+    .badge-live {{
+        background: rgba(34, 197, 94, 0.18);
+        color: #4ade80;
+        border: 1px solid rgba(34, 197, 94, 0.35);
+        animation: pulseLive 2s infinite;
+    }}
+    .badge-yet {{
+        background: rgba(96, 165, 250, 0.12);
+        color: #93c5fd;
+    }}
+    @keyframes pulseLive {{
+        0% {{ opacity: 1; }}
+        50% {{ opacity: 0.55; }}
+        100% {{ opacity: 1; }}
+    }}
+    .trk-bench-hdr {{
+        font-size: 0.68rem;
+        font-weight: 800;
+        color: {text_sub};
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin: 8px 0 4px 0;
+        padding-top: 6px;
+        border-top: 1px solid {row_border};
+    }}
+    </style>
+    <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px;">
+        <span style="font-size: 0.92rem; font-weight: 700; color: {text_main};">Match Tracker</span>
+        <span style="font-size: 0.80rem; font-weight: 600; color: {text_sub}; margin-left: 6px;">({played_label})</span>
+    </div>
+    <div class="trk-card">
+        <div class="trk-summary-box">
+            <div>
+                <span style="font-size: 0.64rem; color: {text_sub}; text-transform: uppercase; font-weight: 700; letter-spacing: 0.03em;">{score_label}</span><br>
+                <span style="font-size: 0.90rem; font-weight: 800; color: {text_main};">{user_eval_pts} pts{xp_addon}</span>
+            </div>
+            {projected_html}
+        </div>
+        <div class="trk-list-container">
+            {starters_html}
+            {bench_html}
+        </div>
+    </div>
+    """)
+    clean_sidebar_html = "\n".join(line.strip() for line in textwrap.dedent(sidebar_html).splitlines() if line.strip())
+    st.markdown(clean_sidebar_html, unsafe_allow_html=True)
+
 def render_squad_analyzer_tab(conn, events_df, current_gw):
     col_t4_hdr, col_t4_pop = st.columns([6.2, 0.8], vertical_alignment="center")
     with col_t4_hdr:
@@ -1128,98 +1557,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
         last_finished_gw = max(finished_gw_ids) if finished_gw_ids else None
         next_gw_id = upcoming_gws[0] if upcoming_gws else current_gw
 
-        picks_data = fetch_manager_picks(mgr_to_use, ongoing_gw or next_gw_id, next_gw_id)
-        entry_history = picks_data.get("entry_history", {})
-        transfers_cost = entry_history.get("event_transfers_cost", 0)
-        base_bank = entry_history.get("bank", mgr_data.get("last_deadline_bank", 0))
-
-        picks_list = picks_data.get("picks", [])
-        pick_ids = [p["element"] for p in picks_list]
-        
-        # Apply any pending transfers for the upcoming gameweek
-        pending_transfers = fetch_manager_transfers(mgr_to_use)
-        if pending_transfers:
-            for t in reversed(pending_transfers):
-                if t.get("event") == next_gw_id:
-                    out_id = t.get("element_out")
-                    in_id = t.get("element_in")
-                    out_cost = t.get("element_out_cost")
-                    in_cost = t.get("element_in_cost")
-                    if out_id in pick_ids:
-                        idx = pick_ids.index(out_id)
-                        pick_ids[idx] = in_id
-                        base_bank = base_bank + out_cost - in_cost
-                        # Also update picks_list so order is maintained
-                        for p in picks_list:
-                            if p["element"] == out_id:
-                                p["element"] = in_id
-                                break
-                                
-        bank_balance = base_bank / 10.0
-        if not pick_ids:
-            st.warning("No squad picks found for this manager.")
-            return
-
-        placeholders = ",".join(["?"] * len(pick_ids))
-        squad_query = f"""
-        SELECT
-            p.id, p.code, p.photo, p.web_name AS Player, p.team AS team_id,
-            t.short_name AS Team,
-            CASE p.element_type WHEN 1 THEN 'GKP' WHEN 2 THEN 'DEF' WHEN 3 THEN 'MID' WHEN 4 THEN 'FWD' END AS Pos,
-            pos.singular_name AS Position, p.now_cost / 10.0 AS Cost, p.minutes AS minutes,
-            p.total_points AS Season_Points, p.expected_goals, p.expected_assists,
-            p.form AS Form, p.points_per_game AS PPG, p.expected_goal_involvements_per_90 AS xGI_per_90,
-            p.news AS News, p.status AS Status, p.chance_of_playing_next_round AS Chance
-        FROM players p
-        INNER JOIN teams t ON p.team = t.id
-        INNER JOIN positions pos ON p.element_type = pos.id
-        WHERE p.id IN ({placeholders})
-        """
-        squad_df = pd.read_sql(squad_query, conn, params=pick_ids)
-
-        meta_dict = {
-            p["element"]: {
-                "multiplier": p["multiplier"],
-                "is_captain": p["is_captain"],
-                "is_vice": p["is_vice_captain"],
-                "order": p["position"],
-            }
-            for p in picks_list
-        }
-        squad_df["order"] = squad_df["id"].map(lambda x: meta_dict[x]["order"])
-        squad_df["Multiplier"] = squad_df["id"].map(lambda x: meta_dict[x]["multiplier"])
-        squad_df["is_cap"] = squad_df["id"].map(lambda x: meta_dict[x]["is_captain"])
-        squad_df["is_vc"] = squad_df["id"].map(lambda x: meta_dict[x]["is_vice"])
-
-        active_calc_gw = ongoing_gw if ongoing_gw else (last_finished_gw or next_gw_id)
-        live_points_map = fetch_live_gameweek_points(active_calc_gw)
-        squad_df["Raw_GW_Pts"] = squad_df["id"].map(lambda x: live_points_map.get(x, {}).get("total_points", 0))
-        squad_df["Live_Mins"] = squad_df["id"].map(lambda x: live_points_map.get(x, {}).get("minutes", 0))
-        squad_df["Live_Bonus"] = squad_df["id"].map(lambda x: live_points_map.get(x, {}).get("bonus", 0))
-        squad_df["Live_BPS"] = squad_df["id"].map(lambda x: live_points_map.get(x, {}).get("bps", 0))
-        squad_df["Live_Explain"] = squad_df["id"].map(lambda x: live_points_map.get(x, {}).get("explain", []))
-        squad_df["GW_Points"] = squad_df["Raw_GW_Pts"] * squad_df["Multiplier"]
-
-        starting_xi_pts = squad_df[squad_df["order"] <= 11]["GW_Points"].sum()
-        active_gw_pts = int(starting_xi_pts) - transfers_cost
-
-        squad_value = float(squad_df["Cost"].sum()) if not squad_df.empty else 100.0
-        total_team_value = squad_value + bank_balance
-        active_score_label = f"{active_gw_pts} pts (Live)" if ongoing_gw else f"{active_gw_pts} pts"
-
-        m1, m2, m3, m4, m5, m6 = st.columns(6)
-        m1.metric("Manager", mgr_data.get("name", "My Team"))
-        m2.metric("Overall Rank", f"{overall_rank:,}", delta=rank_delta_str)
-        m3.metric("Total Points", f"{total_points:,}")
-        m4.metric(
-            "Active GW",
-            active_score_label,
-            delta=f"-{transfers_cost} hit" if transfers_cost > 0 else None,
-            delta_color="inverse",
-        )
-        m5.metric("Squad Value", f"£{squad_value:.1f}m")
-        m6.metric("In The Bank", f"£{bank_balance:.1f}m")
-
+        # --- 1. MOVED GAMEWEEK SELECTION UI HERE ---
         all_gw_options = []
         if last_finished_gw is not None:
             all_gw_options.append(last_finished_gw)
@@ -1286,7 +1624,100 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 st.toast("Dashboard & odds synced!", icon=":material/bolt: ")
                 st.rerun()
 
+        # --- 2. UPDATE SQUAD FETCH TO USE SELECTED GW ---
+        picks_data = fetch_manager_picks(mgr_to_use, selected_eval_gw, next_gw_id)
+        entry_history = picks_data.get("entry_history", {})
+        transfers_cost = entry_history.get("event_transfers_cost", 0)
+        base_bank = entry_history.get("bank", mgr_data.get("last_deadline_bank", 0))
+
+        picks_list = picks_data.get("picks", [])
+        pick_ids = [p["element"] for p in picks_list]
         
+        # --- 3. RESTRICT PENDING TRANSFERS TO UPCOMING GW ONLY ---
+        if selected_eval_gw == next_gw_id:
+            pending_transfers = fetch_manager_transfers(mgr_to_use)
+            if pending_transfers:
+                for t in reversed(pending_transfers):
+                    if t.get("event") == next_gw_id:
+                        out_id = t.get("element_out")
+                        in_id = t.get("element_in")
+                        out_cost = t.get("element_out_cost")
+                        in_cost = t.get("element_in_cost")
+                        if out_id in pick_ids:
+                            idx = pick_ids.index(out_id)
+                            pick_ids[idx] = in_id
+                            base_bank = base_bank + out_cost - in_cost
+                            # Also update picks_list so order is maintained
+                            for p in picks_list:
+                                if p["element"] == out_id:
+                                    p["element"] = in_id
+                                    break
+                                
+        bank_balance = base_bank / 10.0
+        if not pick_ids:
+            st.warning("No squad picks found for this manager.")
+            return
+
+        placeholders = ",".join(["?"] * len(pick_ids))
+        squad_query = f"""
+        SELECT
+            p.id, p.code, p.photo, p.web_name AS Player, p.team AS team_id,
+            t.short_name AS Team,
+            CASE p.element_type WHEN 1 THEN 'GKP' WHEN 2 THEN 'DEF' WHEN 3 THEN 'MID' WHEN 4 THEN 'FWD' END AS Pos,
+            pos.singular_name AS Position, p.now_cost / 10.0 AS Cost, p.minutes AS minutes,
+            p.total_points AS Season_Points, p.expected_goals, p.expected_assists,
+            p.form AS Form, p.points_per_game AS PPG, p.expected_goal_involvements_per_90 AS xGI_per_90,
+            p.news AS News, p.status AS Status, p.chance_of_playing_next_round AS Chance
+        FROM players p
+        INNER JOIN teams t ON p.team = t.id
+        INNER JOIN positions pos ON p.element_type = pos.id
+        WHERE p.id IN ({placeholders})
+        """
+        squad_df = pd.read_sql(squad_query, conn, params=pick_ids)
+
+        meta_dict = {
+            p["element"]: {
+                "multiplier": p["multiplier"],
+                "is_captain": p["is_captain"],
+                "is_vice": p["is_vice_captain"],
+                "order": p["position"],
+            }
+            for p in picks_list
+        }
+        squad_df["order"] = squad_df["id"].map(lambda x: meta_dict[x]["order"])
+        squad_df["Multiplier"] = squad_df["id"].map(lambda x: meta_dict[x]["multiplier"])
+        squad_df["is_cap"] = squad_df["id"].map(lambda x: meta_dict[x]["is_captain"])
+        squad_df["is_vc"] = squad_df["id"].map(lambda x: meta_dict[x]["is_vice"])
+
+        active_calc_gw = selected_eval_gw
+        live_points_map = fetch_live_gameweek_points(active_calc_gw)
+        squad_df["Raw_GW_Pts"] = squad_df["id"].map(lambda x: live_points_map.get(x, {}).get("total_points", 0))
+        squad_df["Live_Mins"] = squad_df["id"].map(lambda x: live_points_map.get(x, {}).get("minutes", 0))
+        squad_df["Live_Bonus"] = squad_df["id"].map(lambda x: live_points_map.get(x, {}).get("bonus", 0))
+        squad_df["Live_BPS"] = squad_df["id"].map(lambda x: live_points_map.get(x, {}).get("bps", 0))
+        squad_df["Live_Explain"] = squad_df["id"].map(lambda x: live_points_map.get(x, {}).get("explain", []))
+        squad_df["GW_Points"] = squad_df["Raw_GW_Pts"] * squad_df["Multiplier"]
+
+        starting_xi_pts = squad_df[squad_df["order"] <= 11]["GW_Points"].sum()
+        active_gw_pts = int(starting_xi_pts) - transfers_cost
+
+        squad_value = float(squad_df["Cost"].sum()) if not squad_df.empty else 100.0
+        total_team_value = squad_value + bank_balance
+        active_score_label = f"{active_gw_pts} pts (Live)" if (selected_eval_gw == ongoing_gw) else f"{active_gw_pts} pts"
+
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        m1.metric("Manager", mgr_data.get("name", "My Team"))
+        m2.metric("Overall Rank", f"{overall_rank:,}", delta=rank_delta_str)
+        m3.metric("Total Points", f"{total_points:,}")
+        m4.metric(
+            "Active GW",
+            active_score_label,
+            delta=f"-{transfers_cost} hit" if transfers_cost > 0 else None,
+            delta_color="inverse",
+        )
+        m5.metric("Squad Value", f"£{squad_value:.1f}m")
+        m6.metric("In The Bank", f"£{bank_balance:.1f}m")
+
         is_finished_gw = selected_eval_gw in finished_gw_ids
         is_ongoing_gw = (selected_eval_gw == ongoing_gw)
         is_live_or_finished = is_finished_gw or is_ongoing_gw
@@ -1358,6 +1789,8 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             else:
                 user_eval_pts = active_gw_pts
 
+            squad_df = enrich_live_squad_with_fixtures_and_xp(squad_df, conn, selected_eval_gw, current_gw)
+
             motw_manager_data = fetch_motw_manager_data(selected_eval_gw)
             dream_team_data = fetch_dream_team_data(selected_eval_gw)
 
@@ -1402,6 +1835,8 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 comp_df["Live_Explain"] = comp_df["id"].map(lambda x: comp_live_pts_map.get(x, {}).get("explain", []))
                 comp_df["GW_Points"] = comp_df["Raw_GW_Pts"] * comp_df["Multiplier"]
 
+                comp_df = enrich_live_squad_with_fixtures_and_xp(comp_df, conn, selected_eval_gw, current_gw)
+
                 comp_starters = comp_df[comp_df["order"] <= 11].sort_values("order")
                 comp_bench = comp_df[comp_df["order"] > 11].sort_values("order")
 
@@ -1435,8 +1870,8 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             else:
                 gw_rank_str = f"{gw_rank:,}"
 
-            # Calculate Players Played
-            played_count = len(user_starters[user_starters["Live_Mins"] > 0])
+            # Calculate Players Played (Aligns with Match Tracker fixture status)
+            played_count = len(user_starters[user_starters["Match_Status"].isin(["finished", "live"])])
             if is_finished_gw:
                 played_str = "All Played"
             else:
@@ -1480,13 +1915,44 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                         """,
                         unsafe_allow_html=True,
                     )
-                    render_pitch_component(
-                        user_starters,
-                        user_bench,
-                        is_live=True,
-                        rolling_df=rolling_metrics_df,
-                        fdr_map=teams_fdr_map,
-                    )
+                    if pitch_view:
+                        render_pitch_component(
+                            user_starters,
+                            user_bench,
+                            is_live=True,
+                            rolling_df=rolling_metrics_df,
+                            fdr_map=teams_fdr_map,
+                        )
+                    else:
+                        for idx, (_, row) in enumerate(user_starters.iterrows()):
+                            tags = [(row["Pos"], "blue"), (f"FDR {row['FDR']}", "gray")]
+                            mult = int(round(float(row.get("Multiplier", 1))))
+                            mult_label = f" ({mult}x)" if mult > 1 else ""
+                            if mult == 3:
+                                tags.append(("Triple Captain (3x)", "yellow"))
+                            elif row.get("is_cap") is True:
+                                tags.append(("Captain (2x)", "green"))
+                            elif row.get("is_vc") is True:
+                                tags.append(("Vice Captain", "yellow"))
+                            
+                            pts = int(row.get("GW_Points", 0))
+                            render_list_card(
+                                f"{row['Player']} · {row['Team']}",
+                                tags,
+                                f'<span>Fixture</span> {row["Opponent"]} · <span>Live Pts</span> <strong>{pts}</strong>{mult_label}',
+                                img_url=get_player_img_url(row.get("photo"), row.get("code")),
+                            )
+                        if not user_bench.empty:
+                            st.markdown("##### :material/chair:  Bench")
+                            for idx, (_, row) in enumerate(user_bench.iterrows()):
+                                sub_label = "Sub GKP" if row["Pos"] == "GKP" else f"Sub {idx}"
+                                pts = int(row.get("Raw_GW_Pts", 0))
+                                render_list_card(
+                                    f"{row['Player']} · {row['Team']}",
+                                    [(sub_label, "gray"), (f"FDR {row['FDR']}", "gray")],
+                                    f'<span>Fixture</span> {row["Opponent"]} · <span>Live Pts</span> <strong>{pts}</strong>',
+                                    img_url=get_player_img_url(row.get("photo"), row.get("code")),
+                                )
                 with col_right:
                     st.markdown(
                         f"""
@@ -1497,30 +1963,110 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                         """,
                         unsafe_allow_html=True,
                     )
-                    render_pitch_component(
-                        comp_starters,
-                        comp_bench,
-                        is_live=True,
-                        rolling_df=rolling_metrics_df,
-                        fdr_map=teams_fdr_map,
-                    )
+                    if pitch_view:
+                        render_pitch_component(
+                            comp_starters,
+                            comp_bench,
+                            is_live=True,
+                            rolling_df=rolling_metrics_df,
+                            fdr_map=teams_fdr_map,
+                        )
+                    else:
+                        for idx, (_, row) in enumerate(comp_starters.iterrows()):
+                            tags = [(row["Pos"], "blue"), (f"FDR {row['FDR']}", "gray")]
+                            mult = int(round(float(row.get("Multiplier", 1))))
+                            mult_label = f" ({mult}x)" if mult > 1 else ""
+                            if mult == 3:
+                                tags.append(("Triple Captain (3x)", "yellow"))
+                            elif row.get("is_cap") is True:
+                                tags.append(("Captain (2x)", "green"))
+                            elif row.get("is_vc") is True:
+                                tags.append(("Vice Captain", "yellow"))
+                            
+                            pts = int(row.get("GW_Points", 0))
+                            render_list_card(
+                                f"{row['Player']} · {row['Team']}",
+                                tags,
+                                f'<span>Fixture</span> {row["Opponent"]} · <span>Live Pts</span> <strong>{pts}</strong>{mult_label}',
+                                img_url=get_player_img_url(row.get("photo"), row.get("code")),
+                            )
+                        if not comp_bench.empty:
+                            st.markdown("##### :material/chair:  Bench")
+                            for idx, (_, row) in enumerate(comp_bench.iterrows()):
+                                sub_label = "Sub GKP" if row["Pos"] == "GKP" else f"Sub {idx}"
+                                pts = int(row.get("Raw_GW_Pts", 0))
+                                render_list_card(
+                                    f"{row['Player']} · {row['Team']}",
+                                    [(sub_label, "gray"), (f"FDR {row['FDR']}", "gray")],
+                                    f'<span>Fixture</span> {row["Opponent"]} · <span>Live Pts</span> <strong>{pts}</strong>',
+                                    img_url=get_player_img_url(row.get("photo"), row.get("code")),
+                                )
             else:
-                st.markdown(
-                    f"""
-                    <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px;">
-                        <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">Your Squad · GW{selected_eval_gw}</span>
-                        <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({user_eval_pts} pts)</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                render_pitch_component(
-                    user_starters,
-                    user_bench,
-                    is_live=True,
-                    rolling_df=rolling_metrics_df,
-                    fdr_map=teams_fdr_map,
-                )
+                if pitch_view:
+                    col_pitch, col_side = st.columns([3, 1])
+                    with col_pitch:
+                        st.markdown(
+                            f"""
+                            <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px;">
+                                <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">Your Squad · GW{selected_eval_gw}</span>
+                                <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({user_eval_pts} pts)</span>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        render_pitch_component(
+                            user_starters,
+                            user_bench,
+                            is_live=True,
+                            rolling_df=rolling_metrics_df,
+                            fdr_map=teams_fdr_map,
+                        )
+                    with col_side:
+                        render_match_tracker_sidebar(
+                            user_starters,
+                            user_bench,
+                            user_eval_pts=user_eval_pts,
+                            is_dark=is_dark,
+                        )
+                else:
+                    st.markdown(
+                        f"""
+                        <div style="height: 28px; display: flex; align-items: center; margin-bottom: 6px;">
+                            <span style="font-size: 0.92rem; font-weight: 700; color: #f8fafc;">Your Squad · GW{selected_eval_gw}</span>
+                            <span style="font-size: 0.80rem; font-weight: 600; color: #94a3b8; margin-left: 6px;">({user_eval_pts} pts)</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    for idx, (_, row) in enumerate(user_starters.iterrows()):
+                        tags = [(row["Pos"], "blue"), (f"FDR {row['FDR']}", "gray")]
+                        mult = int(round(float(row.get("Multiplier", 1))))
+                        mult_label = f" ({mult}x)" if mult > 1 else ""
+                        if mult == 3:
+                            tags.append(("Triple Captain (3x)", "yellow"))
+                        elif row.get("is_cap") is True:
+                            tags.append(("Captain (2x)", "green"))
+                        elif row.get("is_vc") is True:
+                            tags.append(("Vice Captain", "yellow"))
+                        
+                        pts = int(row.get("GW_Points", 0))
+                        render_list_card(
+                            f"{row['Player']} · {row['Team']}",
+                            tags,
+                            f'<span>Fixture</span> {row["Opponent"]} · <span>Live Pts</span> <strong>{pts}</strong>{mult_label}',
+                            img_url=get_player_img_url(row.get("photo"), row.get("code")),
+                        )
+                    if not user_bench.empty:
+                        st.markdown("##### :material/chair:  Bench")
+                        for idx, (_, row) in enumerate(user_bench.iterrows()):
+                            sub_label = "Sub GKP" if row["Pos"] == "GKP" else f"Sub {idx}"
+                            pts = int(row.get("Raw_GW_Pts", 0))
+                            render_list_card(
+                                f"{row['Player']} · {row['Team']}",
+                                [(sub_label, "gray"), (f"FDR {row['FDR']}", "gray")],
+                                f'<span>Fixture</span> {row["Opponent"]} · <span>Live Pts</span> <strong>{pts}</strong>',
+                                img_url=get_player_img_url(row.get("photo"), row.get("code")),
+                            )
 
         else:
             calc_loader = st.empty()
@@ -1687,7 +2233,8 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                         formation=optimal_formation,
                         market_weight=market_weight,
                         factor_movement=factor_movement,
-                        chip=active_chip if chip_active_on_gw else None
+                        chip=active_chip if chip_active_on_gw else None,
+                        source="Squad Analyzer"
                     )
                     st.toast(f"Snapshot locked for GW{next_gw_id}!", icon=":material/lock:")
                     st.rerun()
@@ -1808,6 +2355,11 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                                     img_url=get_player_img_url(row.get("photo"), row.get("code")),
                                 )
 
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button(":material/save: Save Optimal Squad for Simulator", key="btn_save_opt_sim", use_container_width=True):
+                        st.session_state["active_squad_sim_df"] = pd.concat([optimal_xi, optimal_bench], ignore_index=True)
+                        st.toast("Saved Optimal Squad to Simulator!", icon=":material/check_circle:")
+
                 with col_right:
                     st.markdown(
                         f"""
@@ -1852,6 +2404,11 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                                     img_url=get_player_img_url(row.get("photo"), row.get("code")),
                                 )
 
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button(":material/save: Save Budget 15 for Simulator", key="btn_save_budget_sim", use_container_width=True):
+                        st.session_state["budget_dream_15_df"] = pd.concat([comp_xi, comp_bench], ignore_index=True)
+                        st.toast("Saved Budget 15 to Simulator!", icon=":material/check_circle:")
+
                 if enable_betting:
                     st.markdown("<br>", unsafe_allow_html=True)
                     if disagreements:
@@ -1874,7 +2431,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                         st.warning(f"**{row['Player']}**: {row.get('News', 'Doubtful')}")
 
             else:
-                col_pitch, col_side = st.columns([7, 3])
+                col_pitch, col_side = st.columns([3, 1])
                 with col_pitch:
                     st.markdown(
                         f"""
@@ -1920,6 +2477,11 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                                     f'<span>Fixture</span> {row["Opponent"]} · <span>Proj Pts</span> {fmt_num(row["Proj_Pts"], ".1f")} · <span>Cost</span> £{fmt_num(row["Cost"], ".1f")}',
                                     img_url=get_player_img_url(row.get("photo"), row.get("code")),
                                 )
+
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button(":material/save: Save Optimal Squad for Simulator", key="btn_save_opt_sim", use_container_width=True):
+                        st.session_state["active_squad_sim_df"] = pd.concat([optimal_xi, optimal_bench], ignore_index=True)
+                        st.toast("Saved Optimal Squad to Simulator!", icon=":material/check_circle:")
 
                 with col_side:
                     if enable_betting:

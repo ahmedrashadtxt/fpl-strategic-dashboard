@@ -9,6 +9,7 @@ import pulp
 import requests
 import streamlit as st
 
+from audit_db import save_pre_gw_snapshot, get_snapshot
 from betting_engine import (
     load_db_market_odds,
     get_fixture_market_xg_and_movement,
@@ -1553,6 +1554,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             "locked_players": locked_players,
             "targeted_in_players": targeted_in_players,
         }
+        st.session_state["transfer_result"] = st.session_state[state_key]
         results_slot.empty()
 
     if state_key not in st.session_state:
@@ -1603,54 +1605,113 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
             hit_str = f"-{hit_val} pts" if hit_val > 0 else "0 pts"
             st.markdown(f"### :material/my_location: Optimal Transfer Route ({len(swaps)} moves, {hit_str})")
 
-        if not swaps:
-            st.success(":material/check_circle:  Your current squad is optimal for this horizon. No transfer yields higher starting points within your budget.")
-        else:
-            for s in swaps:
-                c_out, c_in, c_delta = st.columns([3, 3, 2])
-                is_target = s.get("target", False)
-                is_forced = s.get("forced_out", False)
+            if not swaps:
+                st.success(":material/check_circle:  Your current squad is optimal for this horizon. No transfer yields higher starting points within your budget.")
+            else:
+                for s in swaps:
+                    c_out, c_in, c_delta = st.columns([3, 3, 2])
+                    is_target = s.get("target", False)
+                    is_forced = s.get("forced_out", False)
 
-                out_badge_title = "[!] FORCED SALE" if is_forced else "[OUT] TRANSFER OUT"
-                in_badge_title = "[TARGET] TARGET SIGNING" if is_target else "[IN] TRANSFER IN"
-                in_badge_color = "#38bdf8" if is_target else "#4ade80"
-                in_bg_color = "rgba(56, 189, 248, 0.1)" if is_target else "rgba(34, 197, 94, 0.1)"
-                in_border_color = "rgba(56, 189, 248, 0.35)" if is_target else "rgba(34, 197, 94, 0.3)"
+                    out_badge_title = "[!] FORCED SALE" if is_forced else "[OUT] TRANSFER OUT"
+                    in_badge_title = "[TARGET] TARGET SIGNING" if is_target else "[IN] TRANSFER IN"
+                    in_badge_color = "#38bdf8" if is_target else "#4ade80"
+                    in_bg_color = "rgba(56, 189, 248, 0.1)" if is_target else "rgba(34, 197, 94, 0.1)"
+                    in_border_color = "rgba(56, 189, 248, 0.35)" if is_target else "rgba(34, 197, 94, 0.3)"
 
-                with c_out:
-                    st.markdown(
-                        f"""
-                        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 8px 12px;">
-                            <span style="font-size: 0.72rem; font-weight: 800; color: #f87171;">{out_badge_title}</span><br>
-                            <strong>{s['out']['Player']}</strong> ({s['out']['Team']}) · £{s['out']['Cost']:.1f}m<br>
-                            <span style="font-size: 0.78rem; color: #94a3b8;">{horizon_gws}-GW xP: {s['out']['Horizon_xP']:.1f} xP</span>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                with c_in:
-                    st.markdown(
-                        f"""
-                        <div style="background: {in_bg_color}; border: 1px solid {in_border_color}; border-radius: 8px; padding: 8px 12px;">
-                            <span style="font-size: 0.72rem; font-weight: 800; color: {in_badge_color};">{in_badge_title}</span><br>
-                            <strong>{s['in']['Player']}</strong> ({s['in']['Team']}) · £{s['in']['Cost']:.1f}m<br>
-                            <span style="font-size: 0.78rem; color: #94a3b8;">{horizon_gws}-GW xP: {s['in']['Horizon_xP']:.1f} xP</span>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                with c_delta:
-                    st.markdown(
-                        f"""
-                        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 8px 12px; height: 100%; display: flex; flex-direction: column; justify-content: center;">
-                            <span style="font-size: 0.72rem; color: #94a3b8;">Expected Gain:</span>
-                            <span style="font-size: 1.1rem; font-weight: 800; color: #38bdf8;">{s['gain']:+.1f} xP</span>
-                            <span style="font-size: 0.72rem; color: #64748b;">Cost: {s['cost_diff']:+.1f}m</span>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                st.markdown("<div style='margin-bottom: 6px;'></div>", unsafe_allow_html=True)
+                    with c_out:
+                        st.markdown(
+                            f"""
+                            <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 8px 12px;">
+                                <span style="font-size: 0.72rem; font-weight: 800; color: #f87171;">{out_badge_title}</span><br>
+                                <strong>{s['out']['Player']}</strong> ({s['out']['Team']}) · £{s['out']['Cost']:.1f}m<br>
+                                <span style="font-size: 0.78rem; color: #94a3b8;">{horizon_gws}-GW xP: {s['out']['Horizon_xP']:.1f} xP</span>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                    with c_in:
+                        st.markdown(
+                            f"""
+                            <div style="background: {in_bg_color}; border: 1px solid {in_border_color}; border-radius: 8px; padding: 8px 12px;">
+                                <span style="font-size: 0.72rem; font-weight: 800; color: {in_badge_color};">{in_badge_title}</span><br>
+                                <strong>{s['in']['Player']}</strong> ({s['in']['Team']}) · £{s['in']['Cost']:.1f}m<br>
+                                <span style="font-size: 0.78rem; color: #94a3b8;">{horizon_gws}-GW xP: {s['in']['Horizon_xP']:.1f} xP</span>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                    with c_delta:
+                        st.markdown(
+                            f"""
+                            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 8px 12px; height: 100%; display: flex; flex-direction: column; justify-content: center;">
+                                <span style="font-size: 0.72rem; color: #94a3b8;">Expected Gain:</span>
+                                <span style="font-size: 1.1rem; font-weight: 800; color: #38bdf8;">{s['gain']:+.1f} xP</span>
+                                <span style="font-size: 0.72rem; color: #64748b;">Cost: {s['cost_diff']:+.1f}m</span>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                    st.markdown("<div style='margin-bottom: 6px;'></div>", unsafe_allow_html=True)
+
+        existing_snap = get_snapshot(conn, next_gw)
+        snap_locked = existing_snap is not None
+
+        st.markdown("<div style='margin-top: 15px; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
+        col_lock_btn, col_lock_info = st.columns([2.2, 7.8], vertical_alignment="center")
+
+        with col_lock_btn:
+            if snap_locked:
+                lock_btn = st.button("Re-Lock Transfer Plan", key="tab3_relock_btn")
+            else:
+                lock_btn = st.button("Lock Transfer Plan Snapshot", type="primary", key="tab3_lock_btn")
+
+        with col_lock_info:
+            if snap_locked:
+                lock_time = existing_snap.get("created_at", "")[:16].replace("T", " ")
+                src_label = existing_snap.get("source", "Squad Analyzer")
+                st.markdown(
+                    f"<div style='font-size: 0.85rem; color: #22c55e; font-weight: 600;'>Locked at {lock_time} ({src_label})</div>",
+                    unsafe_allow_html=True,
+                )
+
+        if lock_btn:
+            starters_list = trans_xi.to_dict("records")
+            for p in starters_list:
+                p["is_starter"] = True
+                if "Proj_Pts" not in p or not p["Proj_Pts"]:
+                    p["Proj_Pts"] = p.get("Horizon_xP", p.get("Avg_xP", 0.0))
+            bench_list = trans_bench.to_dict("records")
+            for p in bench_list:
+                p["is_starter"] = False
+                if "Proj_Pts" not in p or not p["Proj_Pts"]:
+                    p["Proj_Pts"] = p.get("Horizon_xP", p.get("Avg_xP", 0.0))
+            lineup_data = starters_list + bench_list
+
+            transfers_data = []
+            if swaps:
+                for s in swaps:
+                    transfers_data.append({
+                        "out_name": s["out"]["Player"],
+                        "in_name": s["in"]["Player"],
+                        "out_cost": s["out"]["Cost"],
+                        "in_cost": s["in"]["Cost"],
+                        "gain": s.get("gain", 0.0),
+                    })
+
+            save_pre_gw_snapshot(
+                conn=conn,
+                gw=next_gw,
+                lineup_data=lineup_data,
+                transfers_data=transfers_data,
+                formation=trans_formation,
+                market_weight=market_weight,
+                factor_movement=True,
+                chip="Wildcard" if chip_mode == "Wildcard" else ("Free Hit" if chip_mode == "Free Hit" else None),
+                source="Transfer Solver",
+            )
+            st.toast(f"Transfer plan snapshot locked for GW{next_gw}!", icon=":material/lock:")
+            st.rerun()
 
         st.markdown("### :material/balance:  Squad Visual Comparison (Current vs Transfer)")
         is_dark_theme = st.session_state.get("theme_mode", "dark") == "dark"

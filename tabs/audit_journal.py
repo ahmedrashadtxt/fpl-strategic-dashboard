@@ -183,7 +183,7 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
                 if err:
                     st.error(err)
                 else:
-                    new_ver = save_pre_gw_snapshot(conn, selected_gw, lineup_records, transfers_data=[])
+                    new_ver = save_pre_gw_snapshot(conn, selected_gw, lineup_records, transfers_data=[], source="Audit Journal")
                     st.toast(f"GW{selected_gw} locked as Version {new_ver}!", icon=":material/check_circle: ")
                     st.rerun()
 
@@ -238,6 +238,7 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
 
             hist_rows.append({
                 "Version": f"v{v.get('version', 1)}" + (" (Viewing)" if is_cur else ""),
+                "Source": v.get("source", "Squad Analyzer"),
                 "Locked At (UTC)": lock_time,
                 "Formation": v.get("formation") or "4-4-2",
                 "Market Weight": f"{mkt_weight_val:.2f}",

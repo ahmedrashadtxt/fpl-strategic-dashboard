@@ -345,10 +345,10 @@ def get_fixture_market_xg_and_movement(
 
   def classify(dxg, dp):
     if dxg >= 0.20 or dp >= 0.05:
-      return "Steam :material/circle:", "Lineup / Leak Target"
+      return "Steam ↑", "Lineup / Leak Target"
     elif dxg <= -0.20 or dp <= -0.05:
-      return "Drift :material/circle:", "Rotation / Fade Risk"
-    return "Stable ", "Fair Value"
+      return "Drift ↓", "Rotation / Fade Risk"
+    return "Stable —", "Fair Value"
 
   h_move, h_note = classify(delta_h_xg, delta_h_p)
   a_move, a_note = classify(delta_a_xg, delta_a_p)
