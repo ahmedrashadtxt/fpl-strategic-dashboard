@@ -210,11 +210,13 @@ def render_rolling_form_tab(conn, current_gw: int = 1, teams_fdr_map: dict = Non
         min_matches = st.slider(
             "Min Matches",
             min_value=1,
-            max_value=max(1, window_size),
+            max_value=max(2, window_size),
             value=1,
             step=1,
+            disabled=(window_size == 1),
             key="tab2_matches",
         )
+        min_matches = min(min_matches, window_size)
     with col_min_mins2:
         min_avg_mins = st.slider(
             "Min Avg Mins", 0, 90, 45, step=15, key="tab2_mins"
