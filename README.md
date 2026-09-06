@@ -12,8 +12,8 @@ An enterprise-grade **Fantasy Premier League (FPL) Decision-Support System** tha
 
 <div align="center">
   <a href="https://fploptimizer.streamlit.app" target="_blank">
-    <img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg" alt="Streamlit App" height="40">
-  </a>
+  <img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg" alt="Streamlit App" height="35">
+</a>
 </div>
 ---
 
