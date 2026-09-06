@@ -1,3 +1,14 @@
+* 2026-09-06: Add Monte Carlo gameweek simulator to stress-test squads
+* 2026-09-06: Upgrade Custom 15-player sandbox with filterable data table, player photos, and strict constraint tracking
+* 2026-09-06: Add transfer snapshot locking to Transfer Solver to bypass delayed midweek API updates
+* 2026-09-06: Add quick-save buttons to push Optimal Starting 11 and Budget Dream 15 to Match Simulator
+* 2026-09-06: Track and display snapshot origin (Squad Analyzer vs Transfer Solver) in Audit Journal
+* 2026-09-06: Fix fatal boot ImportError by replacing hallucinated render_fpl_dataframe with native st.dataframe
+* 2026-09-06: Fix historical gameweek sequence bug showing current squad instead of past squad
+* 2026-09-06: Fix players played calculation to accurately include players with 0 minutes in finished matches
+* 2026-09-06: Fix Wildcard and Free Hit returning false "optimal squad" success messages
+* 2026-09-06: Fix List View layout bug failing to render during active Live Gameweeks
+* 2026-09-06: Fix UI artifacts (+0.0 xP) on finished gameweeks and standardize opponent fixture strings
 * 2026-09-05: Fix KeyError points crash when settling outcomes in audit journal (ef4d3ac)
 * 2026-09-05: Fix NameError crash in audit_journal by defining is_dark and strip unsupported material strings from raw HTML headers and selectbox labels (17b723c)
 * 2026-09-05: Make example FPL ID URL in the login dialog dynamic based on the active gameweek (33db090)

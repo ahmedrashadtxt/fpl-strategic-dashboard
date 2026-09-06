@@ -22,7 +22,6 @@ from data import (
     solve_optimal_xi,
 )
 from theme import (
-    render_fpl_dataframe,
     fmt_num,
     render_list_card,
     render_optimizer_status,
@@ -1859,4 +1858,4 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         cols_to_show = ["Role", "Player", "Team", "Pos", "Cost", "Horizon_xP", "Avg_xP"] + gw_cols
         cols_to_show = [c for c in cols_to_show if c in display_ledger.columns]
 
-        render_fpl_dataframe(display_ledger[cols_to_show], conn, is_dark_theme)
+        st.dataframe(display_ledger[cols_to_show], hide_index=True, use_container_width=True)

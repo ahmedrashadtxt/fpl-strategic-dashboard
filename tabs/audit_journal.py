@@ -2,7 +2,7 @@ import sqlite3
 import pandas as pd
 import streamlit as st
 import json
-from theme import render_fpl_dataframe, section_header
+from theme import section_header
 from datetime import datetime
 
 # ── Local Imports ─────────────────────────────────────────────────────────────
@@ -247,7 +247,7 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
                 "Actual Score": f"{v['actual_total']} pts" if v.get("actual_total") is not None else "Pending",
                 "Variance": f"{v['variance_pts']:+.1f} pts" if v.get("variance_pts") is not None else "-",
             })
-        render_fpl_dataframe(pd.DataFrame(hist_rows), conn, is_dark)
+        st.dataframe(pd.DataFrame(hist_rows), hide_index=True, use_container_width=True)
 
     # ── Reconstruct Lineup Data ───────────────────────────────────────────────
     lineup = snapshot.get("lineup", [])
@@ -313,7 +313,7 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
             "Actual Score": f"{p.get('actual_pts', 0)} pts" if is_settled else "Pending",
             "Variance (Δ)": f"{p.get('actual_pts', 0) - p.get('Proj_Pts', 0.0):+.1f} pts" if is_settled else "-",
         } for _, p in starters_df.iterrows()])
-        render_fpl_dataframe(table_starters, conn, is_dark)
+        st.dataframe(table_starters, hide_index=True, use_container_width=True)
 
         if not bench_df.empty:
             st.markdown("#### Bench Dugout")
@@ -325,7 +325,7 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
                 "Projected xP": f"{p.get('Proj_Pts', 0.0):.1f}",
                 "Actual Score": f"{p.get('actual_pts', 0)} pts" if is_settled else "Pending",
             } for idx, (_, p) in enumerate(bench_df.iterrows())])
-            render_fpl_dataframe(table_bench, conn, is_dark)
+            st.dataframe(table_bench, hide_index=True, use_container_width=True)
 
     # ── Post-Gameweek Error Decomposition (Settled Only) ──────────────────────
     if is_settled:
@@ -345,7 +345,7 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
                 "Actual": f"{r['Raw_GW_Pts']} pts",
                 "Gain": f"{r['delta']:+.1f} pts"
             } for _, r in top_over.iterrows()])
-            render_fpl_dataframe(over_table, conn, is_dark)
+            st.dataframe(over_table, hide_index=True, use_container_width=True)
 
         with r2:
             st.markdown("##### :material/circle:  Top Variance Leaks (Underperformed Projection)")
@@ -356,4 +356,4 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
                 "Actual": f"{r['Raw_GW_Pts']} pts",
                 "Loss": f"{r['delta']:+.1f} pts"
             } for _, r in top_under.iterrows()])
-            render_fpl_dataframe(under_table, conn, is_dark)
+            st.dataframe(under_table, hide_index=True, use_container_width=True)

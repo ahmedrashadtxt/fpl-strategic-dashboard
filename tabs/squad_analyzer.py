@@ -21,7 +21,6 @@ from data import (
 from audit_db import save_pre_gw_snapshot, get_snapshot
 
 from theme import (
-    render_fpl_dataframe,
     fmt_num,
     render_list_card,
     render_optimizer_status,
@@ -2414,12 +2413,12 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                     if disagreements:
                         st.markdown("#### :material/balance:  Model vs Market Disagreements")
                         unique_d = {v["Club"]: v for v in disagreements}.values()
-                        render_fpl_dataframe(pd.DataFrame(unique_d), conn, is_dark)
+                        st.dataframe(pd.DataFrame(unique_d), hide_index=True, use_container_width=True)
 
                     if movements:
                         st.markdown("#### :material/bolt:  Market Line Movement (Opening vs Current)")
                         unique_m = {v["Club"]: v for v in movements}.values()
-                        render_fpl_dataframe(pd.DataFrame(unique_m), conn, is_dark)
+                        st.dataframe(pd.DataFrame(unique_m), hide_index=True, use_container_width=True)
 
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.markdown("#### :material/newspaper:  Squad News & Availability")
@@ -2488,12 +2487,12 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                         if disagreements:
                             st.markdown("#### :material/balance:  Model vs Market")
                             unique_d = {v["Club"]: v for v in disagreements}.values()
-                            render_fpl_dataframe(pd.DataFrame(unique_d), conn, is_dark)
+                            st.dataframe(pd.DataFrame(unique_d), hide_index=True, use_container_width=True)
 
                         if movements:
                             st.markdown("#### :material/bolt:  Line Movement (Open vs Now)")
                             unique_m = {v["Club"]: v for v in movements}.values()
-                            render_fpl_dataframe(pd.DataFrame(unique_m), conn, is_dark)
+                            st.dataframe(pd.DataFrame(unique_m), hide_index=True, use_container_width=True)
 
                     st.markdown("#### :material/newspaper:  Squad News")
                     flagged = squad_df[squad_df["Status"] != "a"]
