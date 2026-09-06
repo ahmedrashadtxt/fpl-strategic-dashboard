@@ -10,11 +10,11 @@ An enterprise-grade **Fantasy Premier League (FPL) Decision-Support System** tha
 
 > **TL;DR:** An advanced **FPL Decision Support & Optimization Dashboard** built with Streamlit and SQLite. It combines **PuLP Linear Programming** for optimal transfer and starting XI planning with a **Monte Carlo Match Simulator** to stress-test your squad across thousands of probabilistic outcomes. Featuring 9 specialized modular tabs, real-time live gameweek tracking, and immutable pre-deadline snapshot auditing.
 
-<div align="center">
-  <a href="https://fploptimizer.streamlit.app" target="_blank">
-  <img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg" alt="Streamlit App" height="35">
-</a>
-</div>
+<p>
+  <a href="https://fploptimizer.streamlit.app" target="_blank" rel="noopener noreferrer">
+    <img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg" alt="Streamlit App" height="35">
+  </a>
+</p>
 ---
 
 ## 🚀 Key Features
