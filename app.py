@@ -108,6 +108,9 @@ if url_param_team:
   if st.session_state.get("manager_id") != url_param_team:
     st.session_state["manager_id"] = url_param_team
     st.session_state["manager_name"] = ""
+    # Clear old session data
+    for k in ["active_squad_sim_df", "transfer_result", "sim_results", "sim_squad_mode", "budget_dream_15_df", "sandbox_selected_ids", "sandbox_ver"]:
+      st.session_state.pop(k, None)
 elif "manager_id" not in st.session_state:
   st.session_state["manager_id"] = ""
 
@@ -169,12 +172,21 @@ def _render_id_modal_body():
 
   if save_btn:
     cleaned_id = new_id.strip()
-    if cleaned_id:
-      st.session_state["manager_id"] = cleaned_id
-      st.query_params["team"] = cleaned_id
-    else:
-      st.session_state["manager_id"] = ""
-      st.query_params.pop("team", None)
+    # Only update and clear cache if the ID actually changed
+    if cleaned_id != st.session_state.get("manager_id", ""):
+      if cleaned_id:
+        st.session_state["manager_id"] = cleaned_id
+        st.session_state["manager_name"] = ""
+        st.query_params["team"] = cleaned_id
+      else:
+        st.session_state["manager_id"] = ""
+        st.session_state["manager_name"] = ""
+        st.query_params.pop("team", None)
+
+      # Clear old session data
+      for k in ["active_squad_sim_df", "transfer_result", "sim_results", "sim_squad_mode", "budget_dream_15_df", "sandbox_selected_ids", "sandbox_ver"]:
+        st.session_state.pop(k, None)
+
     st.rerun()
 
 
