@@ -4,7 +4,14 @@ import pandas as pd
 from rapidfuzz import fuzz, process
 from st_keyup import st_keyup
 import streamlit as st
-from theme import SILHOUETTE_BASE64, fmt_num, render_list_card, render_sortable_table, section_header
+from theme import (
+    SILHOUETTE_BASE64,
+    fmt_num,
+    render_guide_popover,
+    render_list_card,
+    render_sortable_table,
+    section_header,
+)
 
 pos_map = {"GKP": 1, "DEF": 2, "MID": 3, "FWD": 4}
 
@@ -333,25 +340,26 @@ def fetch_defensive_base_data(_conn, current_gw: int = 1):
 
 @st.fragment
 def render_defensive_stats_tab(conn, current_gw):
-    col_def_hdr, col_def_pop = st.columns([6, 1])
+    col_def_hdr, col_def_pop = st.columns([6.2, 0.8], vertical_alignment="center")
     with col_def_hdr:
         section_header(
             "Defensive Resilience & Projected Defensive xP",
             "Evaluate clean sheet probability, defensive actions, and goalkeeper save points",
         )
     with col_def_pop:
-        st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
-        with st.popover(":material/menu_book:  Guide"):
-            st.markdown(
-                """
-                **Defensive Expected Points Guide**
-                
-                * **Proj Def xP:** Absolute defensive expected points for the upcoming match derived from clean sheet probability ($P(\\text{CS}) \\times 4$ for DEF/GKP, $\\times 1$ for MID), goal concession deductions ($-0.5 \\times xGC$), goalkeeper saves ($+1$ per 3 saves), and playing time probability.
-                * **Min Avg Mins / GW:** Filters out fringe and cameo assets to focus on regular starting defenders/goalkeepers.
-                * **DC (Defensive Contributions):** Cumulative actions tracked for the +2 DC match bonus point threshold (Clearances, Blocks, Interceptions, Tackles).
-                * **Sample Regression:** Small early-season minute samples (<90 mins) are automatically blended with career baselines to prevent sample noise.
-                """
-            )
+        render_guide_popover(
+            title="Defensive Resilience & Projected Defensive xP",
+            subtitle="Evaluate clean sheet probability, defensive actions, and goalkeeper save points",
+            items=[
+                {"badge": "Def xP", "title": "Projected Defensive Points", "desc": "Defensive expected points derived from clean sheet odds (P(CS) × 4 for DEF/GKP, × 1 for MID), goals conceded deductions (-0.5 × xGC), saves (+1 per 3 saves), and playing time.", "color": "#38bdf8"},
+                {"badge": "DC Actions", "title": "Defensive Contributions (DC)", "desc": "Tracks Clearances, Blocks, Interceptions, and Tackles (CBIT) targeting the official FPL +2 DC bonus point threshold.", "color": "#10b981"},
+                {"badge": "Saves", "title": "Goalkeeper Save Projections", "desc": "Expected shot volume and save bonus points projected against opposing team shot rates per 90.", "color": "#818cf8"},
+                {"badge": "Regression", "title": "Sample Size Shrinkage", "desc": "Small early-season minute samples (<90 mins) are automatically regressed toward career baselines to remove sample noise.", "color": "#f59e0b"},
+                {"badge": "Minutes", "title": "Starter Regularity Filter", "desc": "Filters out substitute cameos and rotation liabilities to focus strictly on nailed-on starters.", "color": "#38bdf8"},
+            ],
+            tip="Target budget defenders whose teams concede low-quality shots from distance—they rack up baseline DC actions while preserving high clean sheet odds.",
+            key="guide_pop_defensive_stats",
+        )
 
     col_search, col1, col2, col3 = st.columns([1.4, 1.2, 1, 1.2])
     with col_search:

@@ -3,30 +3,31 @@ import pandas as pd
 from rapidfuzz import fuzz, process
 from st_keyup import st_keyup
 import streamlit as st
-from theme import render_sortable_table, section_header
+from theme import render_guide_popover, render_sortable_table, section_header
 
 
 @st.fragment
 def render_fixture_ticker_tab(conn, current_gw):
-    col_t3_hdr, col_t3_pop = st.columns([6, 1])
+    col_t3_hdr, col_t3_pop = st.columns([6.2, 0.8], vertical_alignment="center")
     with col_t3_hdr:
         section_header(
-            f"Fixture Difficulty · GW{current_gw}{current_gw + 4}",
+            f"Fixture Difficulty · GW{current_gw}–GW{current_gw + 4}",
             "Upcoming schedule ranked by difficulty",
         )
     with col_t3_pop:
-        st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
-        with st.popover(":material/menu_book:  Guide"):
-            st.markdown(
-                """
-                **Fixture Ticker Guide**
-                
-                * **Difficulty Rating:** Sum of official FDR scores across the next 5 gameweeks.
-                * **(H) vs. (A):** Designates Home or Away fixtures.
-                * :material/circle:  **Green Run (10 pts):** Prime fixture swings.
-                * :material/circle:  **Tough Run (15 pts):** Hold off buying assets from these clubs until their schedule clears.
-                """
-            )
+        render_guide_popover(
+            title="Fixture Difficulty Ticker",
+            subtitle="Upcoming schedule ranked by official FDR and venue difficulty",
+            items=[
+                {"badge": "FDR Sum", "title": "Cumulative Difficulty Score", "desc": "Sum of official Premier League FDR scores across the upcoming 5 gameweeks (green = easy run, red = tough test).", "color": "#38bdf8"},
+                {"badge": "Venue", "title": "Home & Away Adjustments", "desc": "(H) vs. (A) tags show home pitch advantage and away fixture handicaps across the 5-match window.", "color": "#10b981"},
+                {"badge": "Swings", "title": "Fixture Swing Timing", "desc": "Identify key turning points where clubs swing from tough runs (FDR 15+) into prime attackable schedules (FDR <= 10).", "color": "#818cf8"},
+                {"badge": "Squad Clubs", "title": "My Squad Club Filter", "desc": "Instantly filter the ticker to isolate the clubs represented in your current 15-player squad.", "color": "#f59e0b"},
+                {"badge": "Search", "title": "Club & Player Quick Lookup", "desc": "Search by player name or 3-letter club abbreviation to immediately locate specific club schedules.", "color": "#38bdf8"},
+            ],
+            tip="Plan transfers 2 to 3 gameweeks ahead of major green fixture swings to beat transfer price rises and capture maximum haul windows.",
+            key="guide_pop_fixture_ticker",
+        )
 
     col_search3, col_sq3 = st.columns([2, 1])
     with col_search3:

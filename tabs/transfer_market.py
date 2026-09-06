@@ -12,7 +12,14 @@ from data import (
     get_historical_player_baselines,
     get_manager_squad_ids,
 )
-from theme import SILHOUETTE_BASE64, fmt_num, render_list_card, render_sortable_table, section_header
+from theme import (
+    SILHOUETTE_BASE64,
+    fmt_num,
+    render_guide_popover,
+    render_list_card,
+    render_sortable_table,
+    section_header,
+)
 
 pos_map = {"GKP": 1, "DEF": 2, "MID": 3, "FWD": 4}
 
@@ -107,6 +114,7 @@ def fetch_transfer_targets_base_data(_conn, current_gw: int, target_gw: int, ena
         p.expected_goals,
         p.expected_assists,
         p.expected_goal_involvements_per_90 AS xGI_per_90,
+        p.selected_by_percent AS Own_Pct,
         p.status AS Status,
         p.chance_of_playing_next_round AS Chance
     FROM players p
@@ -169,7 +177,7 @@ def fetch_transfer_targets_base_data(_conn, current_gw: int, target_gw: int, ena
 
     target_df = pd.DataFrame(results)
     if not target_df.empty:
-        for col in ["Proj_xP", "xP_per_Mil", "Cost", "Price", "Form", "Total_Points", "Season_Points", "FDR"]:
+        for col in ["Proj_xP", "xP_per_Mil", "Cost", "Price", "Form", "Total_Points", "Season_Points", "FDR", "Own_Pct"]:
             if col in target_df.columns:
                 target_df[col] = pd.to_numeric(target_df[col], errors="coerce").fillna(0)
 
@@ -188,25 +196,26 @@ def fetch_transfer_targets_base_data(_conn, current_gw: int, target_gw: int, ena
 
 @st.fragment
 def render_transfer_market_tab(conn, current_gw):
-    col_t5_hdr, col_t5_pop = st.columns([6, 1])
+    col_t5_hdr, col_t5_pop = st.columns([6.2, 0.8], vertical_alignment="center")
     with col_t5_hdr:
         section_header(
             "Transfer Target Finder",
             "Identify high-EV incoming transfer targets ranked by projected points and value efficiency",
         )
     with col_t5_pop:
-        st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
-        with st.popover(":material/menu_book:  Guide"):
-            st.markdown(
-                """
-                **Target Finder & Value Metrics**
-                
-                * **Proj xP:** Projected points for the upcoming fixture using the Hybrid Model (Baseline Rate × Betting Implied Goals × Line Velocity).
-                * **xP / £M:** Points efficiency per million pounds spent. High values highlight budget enablers with elite fixtures.
-                * **Max Price Slider:** Set your exact budget limit to see the best available targets you can afford.
-                * **Exclude My Squad:** Automatically hides players you currently own so you only browse genuine incoming replacements.
-                """
-            )
+        render_guide_popover(
+            title="Transfer Target Finder",
+            subtitle="Identify high-EV incoming transfer targets ranked by projected points and value efficiency",
+            items=[
+                {"badge": "Hybrid xP", "title": "Projected Points (Proj xP)", "desc": "Hybrid projection blending baseline statistical rates, betting market implied goals, and sharp line velocity.", "color": "#38bdf8"},
+                {"badge": "xP / £M", "title": "Points Value Efficiency", "desc": "Expected points generated per million pounds spent. Highlights budget gems that liberate bank budget for premiums.", "color": "#10b981"},
+                {"badge": "Budget Cap", "title": "Max Price Slider", "desc": "Set your exact bank constraints to display the highest projected replacements within your price range.", "color": "#818cf8"},
+                {"badge": "Exclude Squad", "title": "Ownership Filter", "desc": "Automatically hides players already in your current squad so you only evaluate genuine replacement targets.", "color": "#f59e0b"},
+                {"badge": "Sorting", "title": "Flexible Metric Ordering", "desc": "Sort by Proj xP, Value Efficiency, Recent Form, or Fixture Ease depending on your transfer objective.", "color": "#38bdf8"},
+            ],
+            tip="Sort by xP / £M within your exact price ceiling to find under-the-radar enablers with favorable 3-gameweek runs.",
+            key="guide_pop_transfer_market",
+        )
 
     next_gw_df = pd.read_sql(
         "SELECT id FROM events WHERE is_next = 1 LIMIT 1", conn
@@ -234,6 +243,7 @@ def render_transfer_market_tab(conn, current_gw):
                 "Current Form",
                 "Total Season Points",
                 "Price (Low to High)",
+                "Ownership % (Low to High)",
             ],
             key="tab5_sort",
         )
@@ -301,6 +311,7 @@ def render_transfer_market_tab(conn, current_gw):
             "Current Form": ("Form", False),
             "Total Season Points": ("Total_Points", False),
             "Price (Low to High)": ("Cost", True),
+            "Ownership % (Low to High)": ("Own_Pct", True),
         }
         sort_col, sort_asc = sort_options[sort_by5]
         filtered_df = filtered_df.sort_values(by=sort_col, ascending=sort_asc)
@@ -433,7 +444,7 @@ def render_transfer_market_tab(conn, current_gw):
     html_out = [theme_styles, '<div class="unified-table-wrapper"><table class="unified-table"><thead><tr>']
     html_out.append('<th style="text-align: left; padding-left: 1rem;">Target Player</th>')
     html_out.append('<th>Club</th><th>Pos</th><th>Price</th><th>GW Fixture</th><th>FDR</th>')
-    html_out.append('<th>Proj xP</th><th>xP / £M</th><th>Form</th><th>Season Pts</th>')
+    html_out.append('<th>Proj xP</th><th>xP / £M</th><th>Form</th><th>Own %</th><th>Season Pts</th>')
     html_out.append('</tr></thead><tbody>')
 
     for _, row in display_df.iterrows():
@@ -457,6 +468,7 @@ def render_transfer_market_tab(conn, current_gw):
         html_out.append(f'<td><span class="xp-pill">{row["Proj_xP"]:.1f}</span></td>')
         html_out.append(f'<td style="font-weight: 700;">{row["xP_per_Mil"]:.2f}</td>')
         html_out.append(f'<td>{row["Form"]}</td>')
+        html_out.append(f'<td>{float(row["Own_Pct"]):.1f}%</td>')
         html_out.append(f'<td>{int(row["Total_Points"])}</td>')
         html_out.append("</tr>")
 

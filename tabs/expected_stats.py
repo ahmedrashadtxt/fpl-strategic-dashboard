@@ -4,7 +4,14 @@ import pandas as pd
 from rapidfuzz import fuzz, process
 from st_keyup import st_keyup
 import streamlit as st
-from theme import SILHOUETTE_BASE64, fmt_num, render_list_card, render_sortable_table, section_header
+from theme import (
+    SILHOUETTE_BASE64,
+    fmt_num,
+    render_guide_popover,
+    render_list_card,
+    render_sortable_table,
+    section_header,
+)
 
 pos_map = {"GKP": 1, "DEF": 2, "MID": 3, "FWD": 4}
 
@@ -199,25 +206,26 @@ def fetch_expected_stats_base_data(_conn, current_gw: int = 1):
 
 @st.fragment
 def render_expected_stats_tab(conn, current_gw):
-    col_t1_hdr, col_t1_pop = st.columns([6, 1])
+    col_t1_hdr, col_t1_pop = st.columns([6.2, 0.8], vertical_alignment="center")
     with col_t1_hdr:
         section_header(
             "Expected Attacking Points & Efficiency",
             "Evaluate attacking output via expected gameweek points (Proj xP) and underlying goal involvements",
         )
     with col_t1_pop:
-        st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
-        with st.popover(":material/menu_book:  Guide"):
-            st.markdown(
-                """
-                **Expected Attacking Points Guide**
-                
-                * **Proj xP:** Absolute expected attacking points for the upcoming fixture, factoring in shot quality ($xG$), chance creation ($xA$), positional scoring, expected minutes, and availability.
-                * **Min Avg Mins / GW:** Filters out fringe and cameo assets to focus on regular starting players.
-                * **xG / xA / xGI:** Expected Goals, Assists, and Goal Involvements based on shot location and chance quality.
-                * **Career GI / 90:** Multi-season historical actual performance baseline from prior Premier League campaigns.
-                """
-            )
+        render_guide_popover(
+            title="Expected Attacking Points & Efficiency",
+            subtitle="Evaluate attacking output via projected gameweek points (Proj xP) and underlying goal involvements",
+            items=[
+                {"badge": "Proj xP", "title": "Projected Expected Points", "desc": "Absolute expected attacking points for upcoming fixture combining xG, xA, positional scoring rules, and expected minutes.", "color": "#38bdf8"},
+                {"badge": "Volume", "title": "Underlying xG, xA & xGI", "desc": "Expected Goals, Assists, and Goal Involvements per 90 derived from shot quality and chance creation models.", "color": "#10b981"},
+                {"badge": "Baseline", "title": "Career Historical GI/90", "desc": "Multi-season historical baseline performance across previous Premier League campaigns to separate form from class.", "color": "#818cf8"},
+                {"badge": "Minutes", "title": "Playing Time Security", "desc": "Min Avg Mins slider filters out cameo substitutes and rotation-prone squad players to isolate key starters.", "color": "#f59e0b"},
+                {"badge": "Fuzzy Search", "title": "Search-as-you-Type Filtering", "desc": "Instant fuzzy matching across player web names, full names, and 3-letter club codes.", "color": "#38bdf8"},
+            ],
+            tip="Cross-reference Proj xP with Career GI/90. When a player's short-term output heavily outstrips their career baseline, negative regression often follows.",
+            key="guide_pop_expected_stats",
+        )
 
     col_search, col1, col2, col3 = st.columns([1.4, 1.2, 1, 1.2])
     with col_search:

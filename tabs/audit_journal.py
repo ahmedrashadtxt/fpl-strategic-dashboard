@@ -2,7 +2,7 @@ import sqlite3
 import pandas as pd
 import streamlit as st
 import json
-from theme import section_header
+from theme import render_guide_popover, section_header
 from datetime import datetime
 
 # ── Local Imports ─────────────────────────────────────────────────────────────
@@ -134,10 +134,26 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
     init_audit_tables(conn)
     is_dark = st.session_state.get("theme_mode", "dark") == "dark"
 
-    section_header(
-        "Model Audit & Performance Journal",
-        "Inspect locked solver versions, track pre-match line shifts, and audit prediction variance against final outcomes.",
-    )
+    col_hdr, col_pop = st.columns([6.2, 0.8], vertical_alignment="center")
+    with col_hdr:
+        section_header(
+            "Model Audit & Performance Journal",
+            "Inspect locked solver versions, track pre-match line shifts, and audit prediction variance against final outcomes.",
+        )
+    with col_pop:
+        render_guide_popover(
+            title="Model Audit & Performance Journal",
+            subtitle="Inspect locked solver versions, track pre-match line shifts, and audit prediction variance against final outcomes",
+            items=[
+                {"badge": "Snapshots", "title": "Pre-Deadline Snapshots", "desc": "Inspect immutable lineup versions locked before each gameweek deadline to evaluate model projections against actual points.", "color": "#38bdf8"},
+                {"badge": "Versions", "title": "Iteration History", "desc": "Audit each transfer plan revision, formation change, and captain switch made throughout the gameweek window.", "color": "#10b981"},
+                {"badge": "Settlement", "title": "Official Match Settlement", "desc": "Fetch official live/settled FPL points and calculate total squad variance against baseline predictions.", "color": "#818cf8"},
+                {"badge": "Residuals", "title": "Over/Underperformance Analysis", "desc": "Pinpoint individual player residuals to separate bad variance (unlucky finishing) from model blind spots.", "color": "#f59e0b"},
+                {"badge": "Multi-Manager", "title": "Manager Account Isolation", "desc": "All snapshot versions, locks, and settlement states are strictly scoped to your active FPL Team ID.", "color": "#38bdf8"},
+            ],
+            tip="Regularly audit your captain prediction residuals post-gameweek to assess whether your vice-captain was statistically favored by underlying metrics.",
+            key="guide_pop_audit_journal",
+        )
 
     mgr_to_use = st.session_state.get("manager_id", "").strip()
     if not mgr_to_use:

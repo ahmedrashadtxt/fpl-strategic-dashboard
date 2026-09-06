@@ -22,6 +22,7 @@ from audit_db import save_pre_gw_snapshot, get_snapshot
 
 from theme import (
     fmt_num,
+    render_guide_popover,
     render_list_card,
     render_optimizer_status,
     render_skeleton_cards,
@@ -1484,18 +1485,20 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             "Audit live lineup & solve optimal starting XI for future gameweeks",
         )
     with col_t4_pop:
-        with st.popover(":material/menu_book:  Guide"):
-            st.markdown(
-                """
-                **Squad Sync & Optimizer Guide**
-                
-                * **Global Team ID:** Controlled by the top search bar.
-                * **Hover Intel:** Hover over any player on the pitch to inspect rolling form ($xGI/90$, Avg Points, Avg Minutes) and upcoming 5-GW difficulty.
-                * **Clickable Chip Simulation:** Click any active Half 1 chip pill to simulate it across upcoming Gameweeks.
-                * **Pitch vs. List View:** Toggle between visual soccer pitch formation and detailed list cards.
-                * **Comparison:** Compare your optimal starting lineup against the Budget Dream 11 or Super Team.
-                """
-            )
+        render_guide_popover(
+            title="Squad Analyzer & Best 11",
+            subtitle="Audit live lineup, inspect player rolling metrics, and solve optimal starting XI for future gameweeks",
+            items=[
+                {"badge": "Global Sync", "title": "Manager Profile Sync", "desc": "Syncs your active 15-man squad, bank balance, and chip availability directly from the official FPL API.", "color": "#38bdf8"},
+                {"badge": "Hover Intel", "title": "Pitch Overlay Metrics", "desc": "Hover over any pitch card to inspect rolling form, xGI/90, average minutes, and upcoming 5-GW fixture difficulty.", "color": "#10b981"},
+                {"badge": "Chips", "title": "Chip Strategy Simulation", "desc": "Click any active chip pill (Wildcard, Free Hit, Bench Boost, Triple Captain) to project outcomes across future gameweeks.", "color": "#818cf8"},
+                {"badge": "View Modes", "title": "Pitch vs. List Layout", "desc": "Toggle between a tactical soccer pitch formation view and dense, sortable list view cards.", "color": "#38bdf8"},
+                {"badge": "Benchmarks", "title": "Dream 11 & Super Team", "desc": "Compare your optimal XI head-to-head against the Budget Dream 11 (within your budget) or unconstrained Super Team.", "color": "#f59e0b"},
+                {"badge": "Pre-Lock", "title": "Lock Lineup Snapshot", "desc": "Lock your squad pre-deadline to track model performance and compute variance in the Audit Journal.", "color": "#10b981"},
+            ],
+            tip="Use the Betting Market overlay toggle to blend bookmaker implied goal totals and market line velocity with statistical projection models before locking your lineup.",
+            key="guide_pop_squad_analyzer",
+        )
 
     mgr_to_use = st.session_state.get("manager_id", "").strip()
 

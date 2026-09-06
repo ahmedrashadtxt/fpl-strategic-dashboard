@@ -163,19 +163,6 @@ html, body, [class*="css"] {{
     background: transparent !important;
 }}
 
-/* Popovers */
-.stApp div[data-testid="stPopoverBody"],
-.stApp [data-baseweb="popover"] > div {{
-    background-color: {bg_card} !important;
-    border: 1px solid {input_border} !important;
-    color: {text_main} !important;
-}}
-.stApp div[data-testid="stPopoverBody"] *,
-.stApp [data-baseweb="popover"] > div * {{
-    color: {text_main} !important;
-    -webkit-text-fill-color: {text_main} !important;
-}}
-
 /* St.info / st.success / st.warning / st.error banners */
 .stApp [data-testid="stAlert"] {{
     background-color: {bg_card} !important;
@@ -205,6 +192,125 @@ html, body, [class*="css"] {{
     -webkit-text-fill-color: {text_meta} !important;
 }}
 """}
+
+/* ── POPOVER BASE STYLING ── */
+.stApp div[data-testid="stPopoverBody"],
+.stApp [data-baseweb="popover"] > div {{
+    background-color: {bg_card} !important;
+    border: 1px solid {input_border} !important;
+    color: {text_main} !important;
+    min-width: 420px !important;
+    max-width: 480px !important;
+    border-radius: 12px !important;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, {shadow_opacity}) !important;
+}}
+.stApp div[data-testid="stPopoverBody"] *,
+.stApp [data-baseweb="popover"] > div * {{
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+}}
+
+/* ── MODERN GUIDE POPOVER COMPONENT ── */
+.modern-guide-container {{
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.75rem !important;
+    padding: 0.2rem 0 !important;
+}}
+.guide-top-banner {{
+    padding-bottom: 0.65rem !important;
+    border-bottom: 1px solid {border_color} !important;
+}}
+.stApp div[data-testid="stPopoverBody"] .guide-eyebrow {{
+    font-size: 0.65rem !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    color: #38bdf8 !important;
+    -webkit-text-fill-color: #38bdf8 !important;
+    margin-bottom: 0.2rem !important;
+}}
+.stApp div[data-testid="stPopoverBody"] .guide-main-title {{
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+    line-height: 1.25 !important;
+    letter-spacing: -0.01em !important;
+}}
+.stApp div[data-testid="stPopoverBody"] .guide-subtitle {{
+    font-size: 0.78rem !important;
+    color: {text_sub} !important;
+    -webkit-text-fill-color: {text_sub} !important;
+    line-height: 1.35 !important;
+    margin-top: 0.25rem !important;
+}}
+.guide-items-list {{
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.5rem !important;
+}}
+.guide-item-card {{
+    background: {bg_list_card} !important;
+    border: 1px solid {border_color} !important;
+    border-radius: 8px !important;
+    padding: 0.6rem 0.75rem !important;
+    transition: all 0.15s ease !important;
+}}
+.guide-item-header {{
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.5rem !important;
+    margin-bottom: 0.3rem !important;
+}}
+.stApp div[data-testid="stPopoverBody"] .guide-item-badge {{
+    font-size: 0.65rem !important;
+    font-weight: 700 !important;
+    padding: 0.15rem 0.45rem !important;
+    border-radius: 4px !important;
+    letter-spacing: 0.02em !important;
+    white-space: nowrap !important;
+    -webkit-text-fill-color: currentColor !important;
+}}
+.stApp div[data-testid="stPopoverBody"] .guide-item-title {{
+    font-size: 0.82rem !important;
+    font-weight: 700 !important;
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+}}
+.stApp div[data-testid="stPopoverBody"] .guide-item-desc {{
+    font-size: 0.75rem !important;
+    color: {text_sub} !important;
+    -webkit-text-fill-color: {text_sub} !important;
+    line-height: 1.45 !important;
+}}
+.guide-tip-box {{
+    background: rgba(245, 158, 11, 0.08) !important;
+    border: 1px solid rgba(245, 158, 11, 0.25) !important;
+    border-left: 3px solid #f59e0b !important;
+    border-radius: 8px !important;
+    padding: 0.6rem 0.75rem !important;
+    margin-top: 0.15rem !important;
+}}
+.guide-tip-header {{
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.4rem !important;
+    margin-bottom: 0.2rem !important;
+}}
+.stApp div[data-testid="stPopoverBody"] .guide-tip-title {{
+    font-size: 0.68rem !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.06em !important;
+    color: #f59e0b !important;
+    -webkit-text-fill-color: #f59e0b !important;
+}}
+.stApp div[data-testid="stPopoverBody"] .guide-tip-desc {{
+    font-size: 0.74rem !important;
+    color: {text_main} !important;
+    -webkit-text-fill-color: {text_main} !important;
+    line-height: 1.4 !important;
+}}
 
 #MainMenu, footer, header[data-testid="stHeader"] {{
     display: none !important;
@@ -878,6 +984,69 @@ def section_header(title: str, description: str = ""):
         f'<div class="section-card"><h3>{esc(title)}</h3>{desc}</div>',
         unsafe_allow_html=True,
     )
+
+
+def get_guide_html(title: str, subtitle: str, items: list[dict], tip: str = None) -> str:
+    items_html = []
+    for item in items:
+        badge = item.get("badge", "")
+        item_title = item.get("title", "")
+        desc = item.get("desc", "")
+        badge_color = item.get("color", "#38bdf8")
+        
+        badge_html = (
+            f'<span class="guide-item-badge" style="background: {badge_color}22; color: {badge_color}; border: 1px solid {badge_color}44;">'
+            f'{esc(badge)}</span>'
+            if badge else ""
+        )
+        
+        desc_html = desc if ("<" in desc and ">" in desc) else esc(desc)
+        
+        items_html.append(
+            f'<div class="guide-item-card">'
+            f'<div class="guide-item-header">'
+            f'{badge_html}'
+            f'<span class="guide-item-title">{esc(item_title)}</span>'
+            f'</div>'
+            f'<div class="guide-item-desc">{desc_html}</div>'
+            f'</div>'
+        )
+
+    tip_html = ""
+    if tip:
+        clean_tip = tip if ("<" in tip and ">" in tip) else esc(tip)
+        tip_html = (
+            f'<div class="guide-tip-box">'
+            f'<div class="guide-tip-header">'
+            f'<span class="guide-tip-icon" style="-webkit-text-fill-color: #f59e0b !important;">&#x1F4A1;</span>'
+            f'<span class="guide-tip-title">PRO STRATEGY</span>'
+            f'</div>'
+            f'<div class="guide-tip-desc">{clean_tip}</div>'
+            f'</div>'
+        )
+
+    return (
+        f'<div class="modern-guide-container">'
+        f'<div class="guide-top-banner">'
+        f'<div class="guide-eyebrow">STRATEGIC TOOL GUIDE</div>'
+        f'<div class="guide-main-title">{esc(title)}</div>'
+        f'<div class="guide-subtitle">{esc(subtitle)}</div>'
+        f'</div>'
+        f'<div class="guide-items-list">'
+        f'{"".join(items_html)}'
+        f'</div>'
+        f'{tip_html}'
+        f'</div>'
+    )
+
+
+def render_guide_popover(title: str, subtitle: str, items: list[dict], tip: str = None, key: str = None):
+    """Renders a standardized modern guide popover button and structured content dialog."""
+    popover_kwargs = {"help": f"Open {title} Guide"}
+    if key:
+        popover_kwargs["key"] = key
+    with st.popover(":material/menu_book:  Guide", **popover_kwargs):
+        st.markdown(get_guide_html(title, subtitle, items, tip), unsafe_allow_html=True)
 
 
 def render_sortable_table(table_html: str, is_dark: bool = True, height: int = 560):

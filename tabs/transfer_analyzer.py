@@ -23,6 +23,7 @@ from data import (
 )
 from theme import (
     fmt_num,
+    render_guide_popover,
     render_list_card,
     render_optimizer_status,
     render_skeleton_cards,
@@ -1239,10 +1240,27 @@ def render_transfer_pitch_component(
 
 
 def render_transfer_analyzer_tab(conn, events_df, current_gw):
-    section_header(
-        "Transfer Planner & Horizon Solver",
-        "Formulate optimal multi-gameweek transfer routes with customized player locking and budget management",
-    )
+    col_hdr, col_pop = st.columns([6.2, 0.8], vertical_alignment="center")
+    with col_hdr:
+        section_header(
+            "Transfer Planner & Horizon Solver",
+            "Formulate optimal multi-gameweek transfer routes with customized player locking and budget management",
+        )
+    with col_pop:
+        render_guide_popover(
+            title="Transfer Planner & Horizon Solver",
+            subtitle="Formulate optimal multi-gameweek transfer routes with customized player locking and budget management",
+            items=[
+                {"badge": "Horizon", "title": "Multi-GW Optimization Horizon", "desc": "Solve transfers across 1 to 5 gameweeks to maximize cumulative expected points rather than single-week punts.", "color": "#38bdf8"},
+                {"badge": "FTs & Hits", "title": "Transfer & Hit Constraints", "desc": "Configure available free transfers (FTs) and cap maximum allowed point deductions (-4, -8, etc.).", "color": "#10b981"},
+                {"badge": "Lock/Exclude", "title": "Tactical Constraints", "desc": "Force must-keep players in your squad or exclude unwanted targets from the linear programming solver.", "color": "#818cf8"},
+                {"badge": "Chips", "title": "Chip Strategy Simulation", "desc": "Simulate Wildcard or Free Hit setups to model total squad overhauls without transfer penalty points.", "color": "#f59e0b"},
+                {"badge": "Market", "title": "Betting Market Blending", "desc": "Incorporate live bookmaker odds and sharp money line movements into player expected point calculations.", "color": "#38bdf8"},
+                {"badge": "Lock Plan", "title": "Commit Transfer Snapshot", "desc": "Lock your solved transfer plan before deadline to track decision quality and outcome variance in the Audit Journal.", "color": "#10b981"},
+            ],
+            tip="Solving across a 3 to 5 gameweek horizon avoids burning transfers on short-term fixture spikes and conserves valuable FTs for unforeseen injuries.",
+            key="guide_pop_transfer_analyzer",
+        )
 
     mgr_to_use = st.session_state.get("manager_id", "").strip()
     if not mgr_to_use:

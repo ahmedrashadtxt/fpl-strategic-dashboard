@@ -8,6 +8,7 @@ import streamlit as st
 from theme import (
     SILHOUETTE_BASE64,
     fmt_num,
+    render_guide_popover,
     render_list_card,
     render_sortable_table,
     section_header,
@@ -147,25 +148,26 @@ def fetch_rolling_base_data(_conn, window_size: int):
 
 @st.fragment
 def render_rolling_form_tab(conn, current_gw: int = 1, teams_fdr_map: dict = None):
-    col_t2_hdr, col_t2_pop = st.columns([6, 1])
+    col_t2_hdr, col_t2_pop = st.columns([6.2, 0.8], vertical_alignment="center")
     with col_t2_hdr:
         section_header(
             "Rolling Form & Projected xP Trends",
             "Analyze rolling points output and expected points trajectory vs fixture schedule",
         )
     with col_t2_pop:
-        st.markdown("<div style='margin-top: 1.2rem;'></div>", unsafe_allow_html=True)
-        with st.popover(":material/menu_book:  Guide"):
-            st.markdown(
-                """
-                **Form vs. Fixtures Scatter Matrix**
-                
-                * **Proj Form xP:** Blended expected points per match combining underlying rolling $xGI/90$, actual rolling points form, appearance security, and upcoming 5-GW fixture difficulty.
-                * **Upcoming 5-GW FDR:** Cumulative fixture difficulty rating over the next 5 games (lower score = greener schedule).
-                * **Price Filter:** Isolate players within your budget constraints.
-                * **Min Matches Filter:** Filters out rotation risks so you only evaluate regular starters.
-                """
-            )
+        render_guide_popover(
+            title="Rolling Form & Projected xP Trends",
+            subtitle="Analyze rolling points output and expected points trajectory vs fixture schedule",
+            items=[
+                {"badge": "Form xP", "title": "Projected Form xP", "desc": "Blended expected points per match combining underlying rolling xGI/90, actual match points form, playing security, and upcoming 5-GW difficulty.", "color": "#38bdf8"},
+                {"badge": "5-GW FDR", "title": "Fixture Difficulty Run", "desc": "Cumulative official FDR rating across the upcoming 5 gameweeks (lower score indicates an easy, green schedule).", "color": "#10b981"},
+                {"badge": "Scatter Matrix", "title": "Quadrant Opportunity Map", "desc": "Visual scatter plot mapping form against schedule difficulty to spot elite targets in Quadrant I (top-left).", "color": "#818cf8"},
+                {"badge": "Price & Match Filters", "title": "Budget & Sample Security", "desc": "Filters players by max budget ceiling and minimum appearances to eliminate low-minute noise.", "color": "#f59e0b"},
+                {"badge": "Rolling xGI", "title": "Expected Underlying Trajectory", "desc": "5-match rolling expected goal involvement trajectory to catch upward and downward form trends before market price changes.", "color": "#38bdf8"},
+            ],
+            tip="Target Quadrant I players (high rolling xGI entering an easy 5-GW green run) for maximum captaincy and price appreciation upside.",
+            key="guide_pop_rolling_form",
+        )
 
     table_exists = pd.read_sql(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='player_match_history'",

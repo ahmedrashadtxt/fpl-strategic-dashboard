@@ -8,23 +8,6 @@
 
 An enterprise-grade **Fantasy Premier League (FPL) Decision-Support System** that fuses integer linear programming (MILP), Monte Carlo probabilistic simulations, sharp bookmaker betting market odds, and rolling underlying expected metrics ($xG$, $xA$, $xGC$, Defensive Contributions) into an interactive, high-performance web dashboard.
 
-> **TL;DR:** An advanced **FPL Decision Support & Optimization Dashboard** built with Streamlit and SQLite. It combines **PuLP Linear Programming** for optimal transfer and starting XI planning with a **Monte Carlo Match Simulator** to stress-test your squad across thousands of probabilistic outcomes. Featuring 9 specialized modular tabs, real-time live gameweek tracking, and immutable pre-deadline snapshot auditing.
-
-<p>
-  <a href="https://fploptimizer.streamlit.app" target="_blank" rel="noopener noreferrer">
-    <img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg" alt="Streamlit App" height="35">
-  </a>
-</p>
----
-
-## 💭 Why I Built This
-
-This was my first season playing Fantasy Premier League, and it showed almost immediately. As a Liverpool supporter, I knew my own team inside out, but the other clubs (except the big 6 maybe) were a blur, and the data I needed to make sense of them was scattered across a dozen different sites and spreadsheets. I wanted one place that pulled it all together, and once that existed, the natural next step was simulation: something to actually help me *decide* who to pick, not just look at more numbers.
-
-I started building this after my squad was already locked in for Gameweek 1, for the record, I opened the season ranked **8,210,955th** overall. Consider this a season-long experiment: I'm using the dashboard every week to help pick my team, and using every gameweek as an excuse to fix edge cases and chip away at the UI. We'll see how far it takes me by Gameweek 38.
-
-> 📝 *The rest of this README (the technical documentation below) was AI-assisted, drafted using Google Antigravity with Gemini 3.8 Flash High, for anyone who wants the full details on how the project is built.*
-
 ---
 
 ## 🚀 Key Features

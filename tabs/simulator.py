@@ -5,7 +5,7 @@ from rapidfuzz import fuzz
 from st_keyup import st_keyup
 from data import get_manager_squad_ids, solve_optimal_xi, calculate_projected_points
 from simulation_engine import build_odds_map, run_gameweek_simulation, run_head_to_head_simulation
-from theme import section_header
+from theme import render_guide_popover, section_header
 from tabs.squad_analyzer import get_cached_league_eval_df, get_cached_league_dream_15
 
 def render_simulator_tab(conn, events_df, current_gw):
@@ -18,17 +18,20 @@ def render_simulator_tab(conn, events_df, current_gw):
             "Stress-test your squad across thousands of probabilistic match outcomes.",
         )
     with col_pop:
-        with st.popover(":material/menu_book:  Guide"):
-            st.markdown(
-                """
-                **Simulator Guide**
-                
-                * **Target Gameweek:** The specific gameweek fixtures to simulate.
-                * **Squad Source:** Test your active squad, your pending transfer plan, or build a custom 15-player squad to simulate wildcards.
-                * **Iterations:** How many thousands of probabilistic match outcomes to compute. Higher is more accurate but slightly slower.
-                * **Compare Against Benchmark:** Toggle to test your transfer plan (or custom squad) head-to-head against your current active squad.
-                """
-            )
+        render_guide_popover(
+            title="Monte Carlo Gameweek Simulator",
+            subtitle="Stress-test your squad across thousands of probabilistic match outcomes",
+            items=[
+                {"badge": "Target GW", "title": "Fixture Simulation Target", "desc": "Select any future gameweek to simulate based on bookmaker clean sheet and anytime goalscorer odds.", "color": "#38bdf8"},
+                {"badge": "Squad Source", "title": "Flexible Squad Selection", "desc": "Test your active FPL squad, locked transfer plan, Budget Dream 15, or build a custom 15-player team.", "color": "#10b981"},
+                {"badge": "Iterations", "title": "Monte Carlo Precision", "desc": "Simulate 1,000 to 10,000 probabilistic iterations to model player goal distributions and variance tails.", "color": "#818cf8"},
+                {"badge": "Sandbox", "title": "Custom 15-Player Sandbox", "desc": "Build hypothetical wildcard teams with fuzzy search, live budget tracking, and club limit enforcement.", "color": "#f59e0b"},
+                {"badge": "Benchmark", "title": "Head-to-Head Comparison", "desc": "Directly compare point distributions between your current team and your planned transfer squad.", "color": "#38bdf8"},
+                {"badge": "Risk Metrics", "title": "Percentile Ranges & Win %", "desc": "Assess 10th percentile floor safety, median expectation, and 90th percentile ceiling boom potential.", "color": "#10b981"},
+            ],
+            tip="Focus on 10th percentile floor projections when defending a mini-league lead, and 90th percentile ceiling when chasing aggressive rank swings.",
+            key="guide_pop_simulator",
+        )
             
     st.markdown("#### Target Gameweek")
     all_gws = events_df[events_df["id"] >= current_gw]["id"].tolist()
