@@ -64,8 +64,52 @@ def init_audit_tables(conn:sqlite3.Connection):
       cursor.execute("ALTER TABLE gw_audit_snapshots ADD COLUMN source TEXT DEFAULT 'Squad Analyzer'")
       conn.commit()
 
+    if "manager_id" not in cols:
+      cursor.execute("""
+        CREATE TABLE gw_audit_snapshots_v3 (
+          manager_id TEXT DEFAULT 'DEFAULT_MGR',
+          gw INTEGER,
+          version INTEGER DEFAULT 1,
+          created_at TEXT,
+          updated_at TEXT,
+          status TEXT,
+          chip_played TEXT,
+          formation TEXT,
+          market_weight REAL,
+          factor_movement INTEGER,
+          lineup_json TEXT,
+          transfers_json TEXT,
+          predicted_total REAL,
+          actual_total INTEGER,
+          variance_pts REAL,
+          bench_points INTEGER,
+          captain_id INTEGER,
+          captain_name TEXT,
+          captain_actual_pts INTEGER,
+          vice_captain_id INTEGER,
+          vice_captain_name TEXT,
+          vice_actual_pts INTEGER,
+          source TEXT DEFAULT 'Squad Analyzer',
+          PRIMARY KEY (manager_id, gw, version)
+        )
+      """)
+      cursor.execute("""
+        INSERT INTO gw_audit_snapshots_v3 
+        SELECT 'DEFAULT_MGR', gw, version, created_at, updated_at, status, chip_played, 
+               formation, market_weight, factor_movement, lineup_json, transfers_json, 
+               predicted_total, actual_total, variance_pts, bench_points, 
+               captain_id, captain_name, captain_actual_pts, vice_captain_id, 
+               vice_captain_name, vice_actual_pts, source 
+        FROM gw_audit_snapshots
+      """)
+      cursor.execute("DROP TABLE gw_audit_snapshots")
+      cursor.execute("ALTER TABLE gw_audit_snapshots_v3 RENAME TO gw_audit_snapshots")
+      conn.commit()
+      return
+
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS gw_audit_snapshots (
+      manager_id TEXT,
       gw INTEGER,
       version INTEGER DEFAULT 1,
       created_at TEXT,
@@ -88,13 +132,14 @@ def init_audit_tables(conn:sqlite3.Connection):
       vice_captain_name TEXT,
       vice_actual_pts INTEGER,
       source TEXT DEFAULT 'Squad Analyzer',
-      PRIMARY KEY (gw, version)
+      PRIMARY KEY (manager_id, gw, version)
     )
   """)
   conn.commit()
 
 def save_pre_gw_snapshot(
   conn:sqlite3.Connection,
+  manager_id:str,
   gw:int,
   lineup_data:list,
   transfers_data:list = None,
@@ -104,12 +149,13 @@ def save_pre_gw_snapshot(
   factor_movement:bool = True,
   source:str = "Squad Analyzer",
 ) -> int:
-  """Saves a new incremental version snapshot for the gameweek."""
+  """Saves a new incremental version snapshot for the gameweek and manager."""
   transfers_data = transfers_data or []
   cursor = conn.cursor()
+  mgr_str = str(manager_id).strip() if manager_id else "DEFAULT_MGR"
   
   # Determine the next incremental version number
-  cursor.execute("SELECT MAX(version) FROM gw_audit_snapshots WHERE gw = ?", (gw,))
+  cursor.execute("SELECT MAX(version) FROM gw_audit_snapshots WHERE manager_id = ? AND gw = ?", (mgr_str, gw))
   row = cursor.fetchone()
   current_max_ver = row[0] if (row and row[0] is not None) else 0
   new_version = current_max_ver + 1
@@ -130,11 +176,12 @@ def save_pre_gw_snapshot(
 
   cursor.execute("""
     INSERT INTO gw_audit_snapshots (
-      gw, version, created_at, status, chip_played, formation, market_weight, 
+      manager_id, gw, version, created_at, status, chip_played, formation, market_weight, 
       factor_movement, lineup_json, transfers_json, predicted_total, 
       captain_id, captain_name, vice_captain_id, vice_captain_name, source
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   """, (
+    mgr_str,
     gw,
     new_version,
     datetime.now(timezone.utc).isoformat(),
@@ -155,13 +202,14 @@ def save_pre_gw_snapshot(
   conn.commit()
   return new_version
 
-def get_snapshot(conn:sqlite3.Connection, gw:int, version:int = None):
+def get_snapshot(conn:sqlite3.Connection, manager_id:str, gw:int, version:int = None):
   """Retrieves a specific version snapshot, or defaults to the latest version."""
   cursor = conn.cursor()
+  mgr_str = str(manager_id).strip() if manager_id else "DEFAULT_MGR"
   if version is not None:
-    cursor.execute("SELECT * FROM gw_audit_snapshots WHERE gw = ? AND version = ?", (gw, version))
+    cursor.execute("SELECT * FROM gw_audit_snapshots WHERE manager_id = ? AND gw = ? AND version = ?", (mgr_str, gw, version))
   else:
-    cursor.execute("SELECT * FROM gw_audit_snapshots WHERE gw = ? ORDER BY version DESC LIMIT 1", (gw,))
+    cursor.execute("SELECT * FROM gw_audit_snapshots WHERE manager_id = ? AND gw = ? ORDER BY version DESC LIMIT 1", (mgr_str, gw))
   
   row = cursor.fetchone()
   if not row:
@@ -173,16 +221,17 @@ def get_snapshot(conn:sqlite3.Connection, gw:int, version:int = None):
   data["transfers"] = json.loads(data["transfers_json"]) if data.get("transfers_json") else []
   return data
 
-def get_all_gw_versions(conn:sqlite3.Connection, gw:int) -> list[dict]:
+def get_all_gw_versions(conn:sqlite3.Connection, manager_id:str, gw:int) -> list[dict]:
   """Retrieves high-level metadata for all saved versions of a given gameweek."""
   cursor = conn.cursor()
+  mgr_str = str(manager_id).strip() if manager_id else "DEFAULT_MGR"
   cursor.execute("""
     SELECT version, created_at, status, predicted_total, actual_total, 
         variance_pts, market_weight, formation, captain_name, source 
     FROM gw_audit_snapshots 
-    WHERE gw = ? 
+    WHERE manager_id = ? AND gw = ? 
     ORDER BY version DESC
-  """, (gw,))
+  """, (mgr_str, gw))
   rows = cursor.fetchall()
   if not rows:
     return []
@@ -190,13 +239,14 @@ def get_all_gw_versions(conn:sqlite3.Connection, gw:int) -> list[dict]:
   cols = [col[0] for col in cursor.description]
   return [dict(zip(cols, r)) for r in rows]
 
-def settle_post_gw_snapshot(conn:sqlite3.Connection, gw:int, live_player_points:dict, target_version:int = None):
+def settle_post_gw_snapshot(conn:sqlite3.Connection, manager_id:str, gw:int, live_player_points:dict, target_version:int = None):
   """Updates the final (or specified) version with official match results and computes variance."""
   cursor = conn.cursor()
+  mgr_str = str(manager_id).strip() if manager_id else "DEFAULT_MGR"
   if target_version is not None:
-    cursor.execute("SELECT version, lineup_json, captain_id, vice_captain_id, predicted_total, chip_played FROM gw_audit_snapshots WHERE gw = ? AND version = ?", (gw, target_version))
+    cursor.execute("SELECT version, lineup_json, captain_id, vice_captain_id, predicted_total, chip_played FROM gw_audit_snapshots WHERE manager_id = ? AND gw = ? AND version = ?", (mgr_str, gw, target_version))
   else:
-    cursor.execute("SELECT version, lineup_json, captain_id, vice_captain_id, predicted_total, chip_played FROM gw_audit_snapshots WHERE gw = ? ORDER BY version DESC LIMIT 1", (gw,))
+    cursor.execute("SELECT version, lineup_json, captain_id, vice_captain_id, predicted_total, chip_played FROM gw_audit_snapshots WHERE manager_id = ? AND gw = ? ORDER BY version DESC LIMIT 1", (mgr_str, gw))
   
   row = cursor.fetchone()
   if not row:
@@ -252,7 +302,7 @@ def settle_post_gw_snapshot(conn:sqlite3.Connection, gw:int, live_player_points:
       captain_actual_pts = ?,
       vice_actual_pts = ?,
       variance_pts = ?
-    WHERE gw = ? AND version = ?
+    WHERE manager_id = ? AND gw = ? AND version = ?
   """, (
     datetime.now(timezone.utc).isoformat(),
     json.dumps(lineup),
@@ -261,6 +311,7 @@ def settle_post_gw_snapshot(conn:sqlite3.Connection, gw:int, live_player_points:
     captain_actual_pts,
     vice_actual_pts,
     variance,
+    mgr_str,
     gw,
     version
   ))

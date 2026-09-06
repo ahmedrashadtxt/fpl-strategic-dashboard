@@ -1653,7 +1653,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
                         )
                     st.markdown("<div style='margin-bottom: 6px;'></div>", unsafe_allow_html=True)
 
-        existing_snap = get_snapshot(conn, next_gw)
+        existing_snap = get_snapshot(conn, mgr_to_use, next_gw)
         snap_locked = existing_snap is not None
 
         st.markdown("<div style='margin-top: 15px; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
@@ -1700,6 +1700,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
 
             save_pre_gw_snapshot(
                 conn=conn,
+                manager_id=mgr_to_use,
                 gw=next_gw,
                 lineup_data=lineup_data,
                 transfers_data=transfers_data,

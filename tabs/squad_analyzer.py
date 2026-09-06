@@ -2195,7 +2195,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             squad_rating = round((0.50 * fdr_ease_pct) + (0.50 * pts_index_pct), 1)
 
             # BELOW the row: Lock Lineup
-            existing_snap = get_snapshot(conn, next_gw_id) if selected_eval_gw == next_gw_id else None
+            existing_snap = get_snapshot(conn, mgr_to_use, next_gw_id) if selected_eval_gw == next_gw_id else None
             snap_locked = existing_snap is not None
             
             if selected_eval_gw == next_gw_id:
@@ -2227,6 +2227,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                     
                     save_pre_gw_snapshot(
                         conn=conn, 
+                        manager_id=mgr_to_use,
                         gw=next_gw_id, 
                         lineup_data=lineup_data, 
                         formation=optimal_formation,

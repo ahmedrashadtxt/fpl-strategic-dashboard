@@ -155,7 +155,7 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
             key="audit_gw_selector",
         )
 
-    all_versions = get_all_gw_versions(conn, selected_gw)
+    all_versions = get_all_gw_versions(conn, mgr_to_use, selected_gw)
     has_snapshots = len(all_versions) > 0
 
     with c2:
@@ -174,7 +174,7 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
             selected_version = None
             st.selectbox("Snapshot Version:", options=["No locks recorded"], disabled=True)
 
-    snapshot = get_snapshot(conn, selected_gw, version=selected_version) if has_snapshots else None
+    snapshot = get_snapshot(conn, mgr_to_use, selected_gw, version=selected_version) if has_snapshots else None
 
     with c3:
         if st.button(":material/lock:  Lock New Version", key=f"lock_btn_gw_{selected_gw}", width='stretch'):
@@ -183,7 +183,7 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
                 if err:
                     st.error(err)
                 else:
-                    new_ver = save_pre_gw_snapshot(conn, selected_gw, lineup_records, transfers_data=[], source="Audit Journal")
+                    new_ver = save_pre_gw_snapshot(conn, mgr_to_use, selected_gw, lineup_records, transfers_data=[], source="Audit Journal")
                     st.toast(f"GW{selected_gw} locked as Version {new_ver}!", icon=":material/check_circle: ")
                     st.rerun()
 
@@ -201,7 +201,7 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
                             pid: data.get("total_points", data.get("points", 0)) if isinstance(data, dict) else data 
                             for pid, data in raw_live_map.items()
                         }
-                        settle_post_gw_snapshot(conn, selected_gw, clean_points_map, target_version=selected_version)
+                        settle_post_gw_snapshot(conn, mgr_to_use, selected_gw, clean_points_map, target_version=selected_version)
                         st.toast(f"GW{selected_gw} Version {selected_version} settled!", icon=":material/check_circle: ")
                         st.rerun()
 
