@@ -248,10 +248,10 @@ with col_search:
 
 with col_theme:
   st.markdown('<span class="theme-toggle-marker"></span>', unsafe_allow_html=True)
-  theme_icon = ":material/light_mode:" if is_dark else ":material/dark_mode:"
-  if st.button(theme_icon, key="theme_toggle_btn", help="Toggle Theme"):
-    st.session_state["theme_mode"] = "light" if is_dark else "dark"
-    st.rerun()
+  #theme_icon = ":material/light_mode:" if is_dark else ":material/dark_mode:"
+  #if st.button(theme_icon, key="theme_toggle_btn", help="Toggle Theme"):
+  #  st.session_state["theme_mode"] = "light" if is_dark else "dark"
+  #  st.rerun()
 
 # ── Main Sticky Tabs ──────────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(
