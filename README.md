@@ -8,6 +8,12 @@
 
 An enterprise-grade **Fantasy Premier League (FPL) Decision-Support System** that fuses integer linear programming (MILP), Monte Carlo probabilistic simulations, sharp bookmaker betting market odds, and rolling underlying expected metrics ($xG$, $xA$, $xGC$, Defensive Contributions) into an interactive, high-performance web dashboard.
 
+<p>
+  <a href="https://fploptimizer.streamlit.app" target="_blank" rel="noopener noreferrer">
+    <img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg" alt="Streamlit App" height="35">
+  </a>
+</p>
+
 ---
 
 ## 💭 Why I Built This
