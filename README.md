@@ -10,6 +10,16 @@ An enterprise-grade **Fantasy Premier League (FPL) Decision-Support System** tha
 
 ---
 
+## 💭 Why I Built This
+
+This was my first season playing Fantasy Premier League, and it showed almost immediately. As a Liverpool supporter, I knew my own team inside out, but the other 19 clubs (except maybe the big 6) were a blur, and the data I needed to make sense of them was scattered across a dozen different sites and spreadsheets. I wanted one place that pulled it all together, and once that existed, the natural next step was simulation: something to actually help me *decide* who to pick, not just look at more numbers.
+
+I started building this after my squad was already locked in for Gameweek 1. For the record, I opened the season ranked **8,210,955th** overall. Consider this a season-long experiment: I'm using the dashboard every week to help pick my team, and using every gameweek as an excuse to fix edge cases and chip away at the UI. We'll see how far it takes me by Gameweek 38 (May 2027).
+
+> 📝 *The rest of this README (the technical documentation below) was AI-assisted, drafted using Google Antigravity with Gemini 3.8 Flash High, for anyone who wants the full details on how the project is built.*
+
+---
+
 ## 🚀 Key Features
 
 ### 1. 📋 Squad Analyzer & Best 11 Optimizer
