@@ -15,7 +15,7 @@ An enterprise-grade **Fantasy Premier League (FPL) Decision-Support System** tha
 ### 1. 📋 Squad Analyzer & Best 11 Optimizer
 * **FPL Account Direct Sync:** Seamlessly integrates with the official FPL API by simply entering your Team ID. Automatically imports your 15-player squad, bank budget, free transfers, and chip statuses.
 * **Optimal XI Integer Solver:** Solves the mathematically optimal starting XI and captain for upcoming gameweeks subject to valid FPL formation constraints (min 3 DEF, min 2 MID, min 1 FWD, 1 GKP) using PuLP.
-* **Pitch & List View Layouts:** Toggle between a soccer pitch formation view with interactive hover intel ($xGI/90$, 5-GW difficulty, average minutes) and dense, sortable list view cards.
+* **Pitch & List View Layouts:** Toggle between a football pitch formation view with interactive hover intel ($xGI/90$, 5-GW difficulty, average minutes) and dense, sortable list view cards.
 * **Live Match Tracker & Real-Time Scores:** Live tracking during active gameweeks, showing real-time match statuses (`finished`, `live`, `upcoming`), live bonus points, and provisional rank movements.
 * **Benchmark Comparisons:** Benchmark your starting XI against the budget-constrained **Dream 11** or unconstrained **Super Team**.
 * **Pre-GW Snapshot Locking:** Lock your optimal lineup into the database pre-deadline to audit model projections against actual outcomes.
