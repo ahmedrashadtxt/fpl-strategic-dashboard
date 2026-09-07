@@ -10,6 +10,7 @@ venv/
 env/
 
 # Local databases (if dynamically fetched)
+fpl.db
 
 # OS-specific files
 .DS_Store

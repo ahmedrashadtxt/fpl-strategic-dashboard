@@ -13,6 +13,7 @@ from data import (
   get_summary_stats,
   get_teams_fdr_map,
 )
+from audit_db import is_owner_manager
 from tabs.audit_journal import render_audit_journal_tab
 from tabs.simulator import render_simulator_tab
 from tabs import (
@@ -266,35 +267,40 @@ with col_theme:
   #  st.rerun()
 
 # ── Main Sticky Tabs ──────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(
-  [
-    "Squad Analyzer",
-    "Transfer Solver",
-    "Match Simulator",
-    "Expected Stats",
-    "Defensive Contributions",
-    "Rolling Form",
-    "Fixture Ticker",
-    "Transfer Market",
-    "Audit Journal",
-  ]
-)
+is_owner = is_owner_manager(st.session_state.get("manager_id", ""))
 
-with tab1:
+tab_titles = [
+  "Squad Analyzer",
+  "Transfer Solver",
+  "Match Simulator",
+  "Expected Stats",
+  "Defensive Contributions",
+  "Rolling Form",
+  "Fixture Ticker",
+  "Transfer Market",
+]
+if is_owner:
+  tab_titles.append("Audit Journal")
+
+rendered_tabs = st.tabs(tab_titles)
+
+with rendered_tabs[0]:
   render_squad_analyzer_tab(conn, events_df, current_gw)
-with tab2:
+with rendered_tabs[1]:
   render_transfer_analyzer_tab(conn, events_df, current_gw)
-with tab3:
+with rendered_tabs[2]:
   render_simulator_tab(conn, events_df, current_gw)
-with tab4:
+with rendered_tabs[3]:
   render_expected_stats_tab(conn, current_gw)
-with tab5:
+with rendered_tabs[4]:
   render_defensive_stats_tab(conn, current_gw)
-with tab6:
+with rendered_tabs[5]:
   render_rolling_form_tab(conn, current_gw, teams_fdr_map)
-with tab7:
+with rendered_tabs[6]:
   render_fixture_ticker_tab(conn, current_gw)
-with tab8:
+with rendered_tabs[7]:
   render_transfer_market_tab(conn, current_gw)
-with tab9:
-  render_audit_journal_tab(conn, events_df, current_gw)
+
+if is_owner:
+  with rendered_tabs[8]:
+    render_audit_journal_tab(conn, events_df, current_gw)

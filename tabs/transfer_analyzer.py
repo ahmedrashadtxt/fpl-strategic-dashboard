@@ -9,7 +9,7 @@ import pulp
 import requests
 import streamlit as st
 
-from audit_db import save_pre_gw_snapshot, get_snapshot
+from audit_db import save_pre_gw_snapshot, get_snapshot, is_owner_manager
 from betting_engine import (
     load_db_market_odds,
     get_fixture_market_xg_and_movement,
@@ -1668,62 +1668,63 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
         existing_snap = get_snapshot(conn, mgr_to_use, next_gw)
         snap_locked = existing_snap is not None
 
-        st.markdown("<div style='margin-top: 15px; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
-        col_lock_btn, col_lock_info = st.columns([2.2, 7.8], vertical_alignment="center")
+        if is_owner_manager(mgr_to_use):
+            st.markdown("<div style='margin-top: 15px; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
+            col_lock_btn, col_lock_info = st.columns([2.2, 7.8], vertical_alignment="center")
 
-        with col_lock_btn:
-            if snap_locked:
-                lock_btn = st.button("Re-Lock Transfer Plan", key="tab3_relock_btn")
-            else:
-                lock_btn = st.button("Lock Transfer Plan Snapshot", type="primary", key="tab3_lock_btn")
+            with col_lock_btn:
+                if snap_locked:
+                    lock_btn = st.button("Re-Lock Transfer Plan", key="tab3_relock_btn")
+                else:
+                    lock_btn = st.button("Lock Transfer Plan Snapshot", type="primary", key="tab3_lock_btn")
 
-        with col_lock_info:
-            if snap_locked:
-                lock_time = existing_snap.get("created_at", "")[:16].replace("T", " ")
-                src_label = existing_snap.get("source", "Squad Analyzer")
-                st.markdown(
-                    f"<div style='font-size: 0.85rem; color: #22c55e; font-weight: 600;'>Locked at {lock_time} ({src_label})</div>",
-                    unsafe_allow_html=True,
+            with col_lock_info:
+                if snap_locked:
+                    lock_time = existing_snap.get("created_at", "")[:16].replace("T", " ")
+                    src_label = existing_snap.get("source", "Squad Analyzer")
+                    st.markdown(
+                        f"<div style='font-size: 0.85rem; color: #22c55e; font-weight: 600;'>Locked at {lock_time} ({src_label})</div>",
+                        unsafe_allow_html=True,
+                    )
+
+            if lock_btn:
+                starters_list = trans_xi.to_dict("records")
+                for p in starters_list:
+                    p["is_starter"] = True
+                    if "Proj_Pts" not in p or not p["Proj_Pts"]:
+                        p["Proj_Pts"] = p.get("Horizon_xP", p.get("Avg_xP", 0.0))
+                bench_list = trans_bench.to_dict("records")
+                for p in bench_list:
+                    p["is_starter"] = False
+                    if "Proj_Pts" not in p or not p["Proj_Pts"]:
+                        p["Proj_Pts"] = p.get("Horizon_xP", p.get("Avg_xP", 0.0))
+                lineup_data = starters_list + bench_list
+
+                transfers_data = []
+                if swaps:
+                    for s in swaps:
+                        transfers_data.append({
+                            "out_name": s["out"]["Player"],
+                            "in_name": s["in"]["Player"],
+                            "out_cost": s["out"]["Cost"],
+                            "in_cost": s["in"]["Cost"],
+                            "gain": s.get("gain", 0.0),
+                        })
+
+                save_pre_gw_snapshot(
+                    conn=conn,
+                    manager_id=mgr_to_use,
+                    gw=next_gw,
+                    lineup_data=lineup_data,
+                    transfers_data=transfers_data,
+                    formation=trans_formation,
+                    market_weight=market_weight,
+                    factor_movement=True,
+                    chip="Wildcard" if chip_mode == "Wildcard" else ("Free Hit" if chip_mode == "Free Hit" else None),
+                    source="Transfer Solver",
                 )
-
-        if lock_btn:
-            starters_list = trans_xi.to_dict("records")
-            for p in starters_list:
-                p["is_starter"] = True
-                if "Proj_Pts" not in p or not p["Proj_Pts"]:
-                    p["Proj_Pts"] = p.get("Horizon_xP", p.get("Avg_xP", 0.0))
-            bench_list = trans_bench.to_dict("records")
-            for p in bench_list:
-                p["is_starter"] = False
-                if "Proj_Pts" not in p or not p["Proj_Pts"]:
-                    p["Proj_Pts"] = p.get("Horizon_xP", p.get("Avg_xP", 0.0))
-            lineup_data = starters_list + bench_list
-
-            transfers_data = []
-            if swaps:
-                for s in swaps:
-                    transfers_data.append({
-                        "out_name": s["out"]["Player"],
-                        "in_name": s["in"]["Player"],
-                        "out_cost": s["out"]["Cost"],
-                        "in_cost": s["in"]["Cost"],
-                        "gain": s.get("gain", 0.0),
-                    })
-
-            save_pre_gw_snapshot(
-                conn=conn,
-                manager_id=mgr_to_use,
-                gw=next_gw,
-                lineup_data=lineup_data,
-                transfers_data=transfers_data,
-                formation=trans_formation,
-                market_weight=market_weight,
-                factor_movement=True,
-                chip="Wildcard" if chip_mode == "Wildcard" else ("Free Hit" if chip_mode == "Free Hit" else None),
-                source="Transfer Solver",
-            )
-            st.toast(f"Transfer plan snapshot locked for GW{next_gw}!", icon=":material/lock:")
-            st.rerun()
+                st.toast(f"Transfer plan snapshot locked for GW{next_gw}!", icon=":material/lock:")
+                st.rerun()
 
         st.markdown("### :material/balance:  Squad Visual Comparison (Current vs Transfer)")
         is_dark_theme = st.session_state.get("theme_mode", "dark") == "dark"

@@ -28,6 +28,7 @@ try:
         settle_post_gw_snapshot,
         get_snapshot,
         get_all_gw_versions,
+        is_owner_manager,
     )
 except (ImportError, ModuleNotFoundError):
     from .audit_db import (
@@ -36,6 +37,7 @@ except (ImportError, ModuleNotFoundError):
         settle_post_gw_snapshot,
         get_snapshot,
         get_all_gw_versions,
+        is_owner_manager,
     )
 
 POS_MAP = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
@@ -131,6 +133,10 @@ def compute_active_solver_squad(conn, manager_id: str, target_gw: int, current_g
 
 # ── Tab Renderer ─────────────────────────────────────────────────────────────
 def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
+    mgr_to_use = st.session_state.get("manager_id", "").strip()
+    if not is_owner_manager(mgr_to_use):
+        return
+
     init_audit_tables(conn)
     is_dark = st.session_state.get("theme_mode", "dark") == "dark"
 
@@ -154,11 +160,6 @@ def render_audit_journal_tab(conn, events_df, current_gw, player_pool_df=None):
             tip="Regularly audit your captain prediction residuals post-gameweek to assess whether your vice-captain was statistically favored by underlying metrics.",
             key="guide_pop_audit_journal",
         )
-
-    mgr_to_use = st.session_state.get("manager_id", "").strip()
-    if not mgr_to_use:
-        st.info(":material/arrow_upward:  Enter your FPL Team ID in the top header to load and audit your squad.")
-        return
 
     # ── Controls Bar ──────────────────────────────────────────────────────────
     c1, c2, c3, c4 = st.columns([1.5, 2.0, 1.3, 1.3], vertical_alignment="bottom")

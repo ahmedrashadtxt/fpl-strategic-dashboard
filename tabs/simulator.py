@@ -9,8 +9,6 @@ from theme import render_guide_popover, section_header
 from tabs.squad_analyzer import get_cached_league_eval_df, get_cached_league_dream_15
 
 def render_simulator_tab(conn, events_df, current_gw):
-    st.markdown("<br>", unsafe_allow_html=True)
-    
     col_hdr, col_pop = st.columns([6.2, 0.8], vertical_alignment="center")
     with col_hdr:
         section_header(

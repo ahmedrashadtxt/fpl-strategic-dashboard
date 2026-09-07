@@ -1,5 +1,7 @@
 import sqlite3
 import json
+import os
+from pathlib import Path
 from datetime import datetime, timezone
 
 def init_audit_tables(conn:sqlite3.Connection):
@@ -317,3 +319,98 @@ def settle_post_gw_snapshot(conn:sqlite3.Connection, manager_id:str, gw:int, liv
   ))
   conn.commit()
   return True
+
+
+def get_owner_fpl_id() -> str:
+    """Retrieves the owner/lead developer's FPL Manager ID from Streamlit secrets,
+
+    environment variables, or local .streamlit/secrets.toml.
+    Supports keys: OWNER_FPL_ID, MY_FPL_ID, ADMIN_FPL_ID, FPL_ID, MANAGER_ID.
+    """
+    candidate_keys = (
+        "OWNER_FPL_ID", "owner_fpl_id",
+        "MY_FPL_ID", "my_fpl_id",
+        "ADMIN_FPL_ID", "admin_fpl_id",
+        "FPL_ID", "fpl_id",
+        "MANAGER_ID", "manager_id",
+    )
+
+    # 1. Streamlit secrets (Streamlit Cloud or active Streamlit runtime)
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets"):
+            for k in candidate_keys:
+                if k in st.secrets:
+                    val = str(st.secrets[k]).strip()
+                    if val:
+                        return val
+            # Check nested sections if defined in TOML (e.g. [auth] or [fpl])
+            for sec in ("fpl", "auth", "admin", "general", "owner"):
+                if sec in st.secrets and isinstance(st.secrets[sec], dict):
+                    for k in candidate_keys:
+                        if k in st.secrets[sec]:
+                            val = str(st.secrets[sec][k]).strip()
+                            if val:
+                                return val
+    except Exception:
+        pass
+
+    # 2. Environment variables
+    for k in candidate_keys:
+        val = os.getenv(k, "").strip()
+        if val:
+            return val
+
+    # 3. Direct local .streamlit/secrets.toml check (CLI / non-Streamlit execution)
+    try:
+        secrets_file = Path(".streamlit") / "secrets.toml"
+        if not secrets_file.exists():
+            root_dir = Path(__file__).resolve().parent
+            candidate_path = root_dir / ".streamlit" / "secrets.toml"
+            if candidate_path.exists():
+                secrets_file = candidate_path
+
+        if secrets_file.exists():
+            try:
+                import tomllib
+                with open(secrets_file, "rb") as f:
+                    data = tomllib.load(f)
+                for k in candidate_keys:
+                    if k in data and data[k]:
+                        return str(data[k]).strip()
+                for v in data.values():
+                    if isinstance(v, dict):
+                        for k in candidate_keys:
+                            if k in v and v[k]:
+                                return str(v[k]).strip()
+            except Exception:
+                with open(secrets_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line_clean = line.strip()
+                        for k in candidate_keys:
+                            if line_clean.startswith(k):
+                                parts = line_clean.split("=", 1)
+                                if len(parts) == 2:
+                                    val = parts[1].split("#")[0].strip().strip('"').strip("'")
+                                    if val:
+                                        return val
+    except Exception:
+        pass
+
+    return ""
+
+
+def is_owner_manager(manager_id: str | int | None) -> bool:
+    """Returns True strictly when manager_id matches the configured OWNER_FPL_ID.
+
+    Returns False if manager_id is empty or if no owner ID is configured.
+    """
+    if manager_id is None:
+        return False
+    mgr_str = str(manager_id).strip()
+    if not mgr_str:
+        return False
+    owner_id = get_owner_fpl_id()
+    if not owner_id:
+        return False
+    return mgr_str == owner_id

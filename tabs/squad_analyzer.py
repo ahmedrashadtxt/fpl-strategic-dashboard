@@ -18,7 +18,7 @@ from data import (
     get_teams_fdr_map,
     solve_optimal_xi,
 )
-from audit_db import save_pre_gw_snapshot, get_snapshot
+from audit_db import save_pre_gw_snapshot, get_snapshot, is_owner_manager
 
 from theme import (
     fmt_num,
@@ -2198,7 +2198,7 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
             existing_snap = get_snapshot(conn, mgr_to_use, next_gw_id) if selected_eval_gw == next_gw_id else None
             snap_locked = existing_snap is not None
             
-            if selected_eval_gw == next_gw_id:
+            if selected_eval_gw == next_gw_id and is_owner_manager(mgr_to_use):
                 st.markdown("<div style='margin-top: 15px; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
                 col_lock_btn, col_lock_info = st.columns([1.5, 8.5], vertical_alignment="center")
                 
