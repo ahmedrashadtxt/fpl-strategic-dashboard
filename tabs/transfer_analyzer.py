@@ -1294,13 +1294,7 @@ def render_transfer_analyzer_tab(conn, events_df, current_gw):
     picks_data = fetch_transfer_manager_picks(mgr_to_use, next_gw)
     entry_hist = picks_data.get("entry_history", {})
     
-    # Calculate bank before applying transfers. But wait, if they made transfers, the bank balance is updated!
-    # Wait, the bank balance returned by /event/{gw}/picks/ is the bank AT THAT GAMEWEEK's DEADLINE.
-    # We should get the live bank balance. Where is it?
-    # last_deadline_bank is the bank balance right now!
-    # But wait, last_deadline_value and last_deadline_bank in entry are from the last deadline.
-    # What if they made a transfer? Their bank changes!
-    # Let's adjust bank balance using the transfer costs.
+    # Calculate bank balance adjusted for pending transfers
     base_bank = entry_hist.get("bank", mgr_data.get("last_deadline_bank", 0))
     
     picks_list = picks_data.get("picks", [])

@@ -385,7 +385,7 @@ def render_simulator_tab(conn, events_df, current_gw):
         
         et = p_dict.get("element_type", 3)
         if "Pos" in p_dict and isinstance(p_dict["Pos"], str):
-            pass # keep as is
+            pass
         elif et == 1: p_dict["Pos"] = "GKP"
         elif et == 2: p_dict["Pos"] = "DEF"
         elif et == 4: p_dict["Pos"] = "FWD"

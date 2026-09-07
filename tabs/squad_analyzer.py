@@ -1559,7 +1559,6 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
         last_finished_gw = max(finished_gw_ids) if finished_gw_ids else None
         next_gw_id = upcoming_gws[0] if upcoming_gws else current_gw
 
-        # --- 1. MOVED GAMEWEEK SELECTION UI HERE ---
         all_gw_options = []
         if last_finished_gw is not None:
             all_gw_options.append(last_finished_gw)
@@ -1626,7 +1625,6 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
                 st.toast("Dashboard & odds synced!", icon=":material/bolt: ")
                 st.rerun()
 
-        # --- 2. UPDATE SQUAD FETCH TO USE SELECTED GW ---
         picks_data = fetch_manager_picks(mgr_to_use, selected_eval_gw, next_gw_id)
         entry_history = picks_data.get("entry_history", {})
         transfers_cost = entry_history.get("event_transfers_cost", 0)
@@ -1635,7 +1633,6 @@ def render_squad_analyzer_tab(conn, events_df, current_gw):
         picks_list = picks_data.get("picks", [])
         pick_ids = [p["element"] for p in picks_list]
         
-        # --- 3. RESTRICT PENDING TRANSFERS TO UPCOMING GW ONLY ---
         if selected_eval_gw == next_gw_id:
             pending_transfers = fetch_manager_transfers(mgr_to_use)
             if pending_transfers:
