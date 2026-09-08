@@ -21,24 +21,14 @@ from .squad_analyzer import (
     get_rolling_player_metrics,
 )
 
-try:
-    from audit_db import (
-        init_audit_tables,
-        save_pre_gw_snapshot,
-        settle_post_gw_snapshot,
-        get_snapshot,
-        get_all_gw_versions,
-        is_owner_manager,
-    )
-except (ImportError, ModuleNotFoundError):
-    from .audit_db import (
-        init_audit_tables,
-        save_pre_gw_snapshot,
-        settle_post_gw_snapshot,
-        get_snapshot,
-        get_all_gw_versions,
-        is_owner_manager,
-    )
+from audit_db import (
+    init_audit_tables,
+    save_pre_gw_snapshot,
+    settle_post_gw_snapshot,
+    get_snapshot,
+    get_all_gw_versions,
+    is_owner_manager,
+)
 
 POS_MAP = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
 
