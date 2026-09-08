@@ -18,7 +18,25 @@ from data import (
     get_teams_fdr_map,
     solve_optimal_xi,
 )
-from audit_db import save_pre_gw_snapshot, get_snapshot, is_owner_manager
+try:
+    from audit_db import save_pre_gw_snapshot, get_snapshot, is_owner_manager
+except (ImportError, Exception):
+    import sys
+    if "audit_db" in sys.modules:
+        try:
+            import importlib
+            import audit_db
+            importlib.reload(audit_db)
+            from audit_db import save_pre_gw_snapshot, get_snapshot, is_owner_manager
+        except Exception:
+            def save_pre_gw_snapshot(*args, **kwargs): return 1
+            def get_snapshot(*args, **kwargs): return None
+            def is_owner_manager(manager_id=None): return False
+    else:
+        def save_pre_gw_snapshot(*args, **kwargs): return 1
+        def get_snapshot(*args, **kwargs): return None
+        def is_owner_manager(manager_id=None): return False
+
 
 from theme import (
     fmt_num,

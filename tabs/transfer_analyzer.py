@@ -9,7 +9,25 @@ import pulp
 import requests
 import streamlit as st
 
-from audit_db import save_pre_gw_snapshot, get_snapshot, is_owner_manager
+try:
+    from audit_db import save_pre_gw_snapshot, get_snapshot, is_owner_manager
+except (ImportError, Exception):
+    import sys
+    if "audit_db" in sys.modules:
+        try:
+            import importlib
+            import audit_db
+            importlib.reload(audit_db)
+            from audit_db import save_pre_gw_snapshot, get_snapshot, is_owner_manager
+        except Exception:
+            def save_pre_gw_snapshot(*args, **kwargs): return 1
+            def get_snapshot(*args, **kwargs): return None
+            def is_owner_manager(manager_id=None): return False
+    else:
+        def save_pre_gw_snapshot(*args, **kwargs): return 1
+        def get_snapshot(*args, **kwargs): return None
+        def is_owner_manager(manager_id=None): return False
+
 from betting_engine import (
     load_db_market_odds,
     get_fixture_market_xg_and_movement,

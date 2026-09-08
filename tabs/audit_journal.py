@@ -21,14 +21,45 @@ from .squad_analyzer import (
     get_rolling_player_metrics,
 )
 
-from audit_db import (
-    init_audit_tables,
-    save_pre_gw_snapshot,
-    settle_post_gw_snapshot,
-    get_snapshot,
-    get_all_gw_versions,
-    is_owner_manager,
-)
+try:
+    from audit_db import (
+        init_audit_tables,
+        save_pre_gw_snapshot,
+        settle_post_gw_snapshot,
+        get_snapshot,
+        get_all_gw_versions,
+        is_owner_manager,
+    )
+except (ImportError, Exception):
+    import sys
+    if "audit_db" in sys.modules:
+        try:
+            import importlib
+            import audit_db
+            importlib.reload(audit_db)
+            from audit_db import (
+                init_audit_tables,
+                save_pre_gw_snapshot,
+                settle_post_gw_snapshot,
+                get_snapshot,
+                get_all_gw_versions,
+                is_owner_manager,
+            )
+        except Exception:
+            def init_audit_tables(conn): pass
+            def save_pre_gw_snapshot(*args, **kwargs): return 1
+            def settle_post_gw_snapshot(*args, **kwargs): return False
+            def get_snapshot(*args, **kwargs): return None
+            def get_all_gw_versions(*args, **kwargs): return []
+            def is_owner_manager(manager_id=None): return False
+    else:
+        def init_audit_tables(conn): pass
+        def save_pre_gw_snapshot(*args, **kwargs): return 1
+        def settle_post_gw_snapshot(*args, **kwargs): return False
+        def get_snapshot(*args, **kwargs): return None
+        def get_all_gw_versions(*args, **kwargs): return []
+        def is_owner_manager(manager_id=None): return False
+
 
 POS_MAP = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
 

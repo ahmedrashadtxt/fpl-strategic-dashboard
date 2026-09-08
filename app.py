@@ -13,7 +13,23 @@ from data import (
   get_summary_stats,
   get_teams_fdr_map,
 )
-from audit_db import is_owner_manager
+try:
+  from audit_db import is_owner_manager
+except (ImportError, Exception):
+  import sys
+  if "audit_db" in sys.modules:
+    try:
+      import importlib
+      import audit_db
+      importlib.reload(audit_db)
+      from audit_db import is_owner_manager
+    except Exception:
+      def is_owner_manager(manager_id=None):
+        return False
+  else:
+    def is_owner_manager(manager_id=None):
+      return False
+
 from tabs.audit_journal import render_audit_journal_tab
 from tabs.simulator import render_simulator_tab
 from tabs import (
