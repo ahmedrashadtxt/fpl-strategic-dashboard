@@ -931,13 +931,15 @@ def render_skeleton_cards(count: int = 3):
     return st.markdown(skeleton_cards, unsafe_allow_html=True)
 
 
+from typing import Optional
+
 def render_list_card(
     title: str,
     tags: list[tuple[str, str]],
     meta: str,
-    progress: float | None = None,
+    progress: Optional[float] = None,
     progress_red: bool = False,
-    img_url: str | None = None,
+    img_url: Optional[str] = None,
 ):
     tags_html = "".join(render_tag(label, t) for label, t in tags)
 
