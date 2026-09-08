@@ -501,6 +501,8 @@ def solve_unconstrained_super_15(league_eval_df: pd.DataFrame) -> pd.DataFrame:
 
     return df[df["id"].isin(selected_ids)].copy()
 
+from typing import Optional, Tuple
+
 def apply_market_projection_with_movement(
     conn,
     base_proj_pts: float,
@@ -512,7 +514,7 @@ def apply_market_projection_with_movement(
     market_weight: float,
     factor_movement: bool,
     market_cache: dict,
-) -> tuple[float, dict | None, dict | None]:
+) -> Tuple[float, Optional[dict], Optional[dict]]:
     h_team = team_short if is_home else opp_short
     a_team = opp_short if is_home else team_short
     fdr_h = fdr if is_home else 3

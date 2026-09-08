@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import Union, Optional
 
 def init_audit_tables(conn:sqlite3.Connection):
   """Creates the audit table and migrates older single-version schemas to multi-version primary keys."""
@@ -400,7 +401,7 @@ def get_owner_fpl_id() -> str:
     return ""
 
 
-def is_owner_manager(manager_id: str | int | None) -> bool:
+def is_owner_manager(manager_id: Union[str, int, None]) -> bool:
     """Returns True strictly when manager_id matches the configured OWNER_FPL_ID.
 
     Returns False if manager_id is empty or if no owner ID is configured.
