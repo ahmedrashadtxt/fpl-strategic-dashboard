@@ -6,3 +6,4 @@ streamlit-keyup
 rapidfuzz
 scipy
 pulp
+sqlalchemy
